@@ -2,7 +2,7 @@
 
 An advanced prompt matrix extension for AUTOMATIC1111's Web UI and its popular forks. This extension creates its own dedicated tab, providing a powerful and uncluttered interface for generating complex image grids.
 
-![UI Mockup](https://raw.githubusercontent.com/LSDJesus/sd-ultimate-prompt-matrix/main/UImockup.png)
+![UI Mockup](UIMockup.png)
 
 ## Compatibility
 This script is fully compatible with:

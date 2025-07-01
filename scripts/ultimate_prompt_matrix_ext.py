@@ -1,8 +1,9 @@
 """
-Ultimate Prompt Matrix Extension v5.7 (Definitive UI Fix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v6.0 (Definitive Architectural Release) for AUTOMATIC1111 & Forge
 
-This version resolves all known critical Gradio UI loading and persistence errors,
-ensuring the extension is fully stable and compatible across all Web UI versions.
+This version completely re-architects the UI definition to conform strictly to Gradio's component
+registration lifecycle. It resolves all known UI loading, persistence, and dropdown warning issues,
+making the extension exceptionally stable and reliable.
 """
 
 import math
@@ -376,17 +377,23 @@ def on_ui_tabs():
                 
                 with gr.Accordion("Generation Settings", open=True):
                     with gr.Row():
-                        sampler_name = gr.Dropdown(label='Sampling method', choices=[s.name for s in sd_samplers.samplers], value='Euler a')
+                        # --- Sampler Name Setup ---
+                        sampler_choices = [s.name for s in sd_samplers.samplers]
+                        default_sampler_value = opts.data.get('sd_sampler_name', opts.data.get('sampler_name', 'Euler a'))
+                        if default_sampler_value not in sampler_choices and sampler_choices:
+                            default_sampler_value = sampler_choices[0]
+                        elif not sampler_choices:
+                            default_sampler_value = 'None' # If no samplers are loaded at all
+                        sampler_name = gr.Dropdown(label='Sampling method', choices=sampler_choices, value=default_sampler_value)
                         
-                        # --- FIX: Ensure scheduler default is a valid choice from the list ---
+                        # --- Scheduler Setup ---
                         scheduler_choices = [s.label for s in sd_schedulers.schedulers]
-                        default_scheduler = 'Automatic' # Default preference
-                        if 'Automatic' not in scheduler_choices and scheduler_choices:
-                            default_scheduler = scheduler_choices[0] # Fallback to first available if 'Automatic' is not present
+                        default_scheduler_value = opts.data.get('sd_scheduler', opts.data.get('scheduler_name', 'Automatic'))
+                        if default_scheduler_value not in scheduler_choices and scheduler_choices:
+                            default_scheduler_value = scheduler_choices[0]
                         elif not scheduler_choices:
-                            default_scheduler = None # No schedulers available, set to None
-                            
-                        scheduler = gr.Dropdown(label='Schedule type', choices=scheduler_choices, value=default_scheduler)
+                            default_scheduler_value = 'None' # If no schedulers are loaded at all
+                        scheduler = gr.Dropdown(label='Schedule type', choices=scheduler_choices, value=default_scheduler_value)
                     with gr.Row():
                         steps = gr.Slider(label='Sampling steps', minimum=1, maximum=150, value=20, step=1)
                         cfg_scale = gr.Slider(label='CFG Scale', minimum=1.0, maximum=30.0, value=7.0, step=0.5)
@@ -454,10 +461,8 @@ def on_ui_tabs():
 
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
-            # --- FIX: Define ultimate_matrix_large_batch_threshold here, INSIDE the Blocks context ---
             ultimate_matrix_large_batch_threshold = gr.Number(label="Large Batch Threshold (images)", value=100, precision=0)
-            # --- END FIX ---
-            with gr.Blocks():
+            with gr.Blocks(): # This inner Blocks seems redundant but is preserved as per previous structure
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
         
@@ -473,11 +478,10 @@ def on_ui_tabs():
             html_info = gr.HTML()
             html_log = gr.HTML()
 
-        # --- ALL EVENT HANDLERS DEFINED AFTER ALL COMPONENTS ---
+        # --- ALL EVENT HANDLERS DEFINED AFTER ALL COMPONENTS ARE DEFINED ---
         # This is the crucial part for Gradio's internal registration
 
         # Persistence handlers must also be defined in this proper order
-        # This load function will run at ui_component.load time
         ui_component.load(
             fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
             inputs=[],

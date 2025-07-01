@@ -1,8 +1,8 @@
 """
-Ultimate Prompt Matrix Extension v5.5 (Final Context & Scheduler Fix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.5 (Final Context & Persistence Fix) for AUTOMATIC1111 & Forge
 
 This version resolves critical Gradio context errors and ensures robust default value handling
-for schedulers, making the extension fully stable and reliable across all Web UI versions.
+for schedulers and proper persistence of the Large Batch Threshold, making the extension fully stable.
 """
 
 import math
@@ -33,14 +33,6 @@ REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
 REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
 
 # --- Helper Functions ---
-def get_lora_names():
-    try:
-        sd_models.refresh_loras()
-        return [lora.name for lora in sd_models.loras]
-    except Exception as e:
-        print(f"[Ultimate Matrix] Error getting LoRA names: {e}")
-        return ["None"]
-
 def get_font(fontsize):
     try: return ImageFont.truetype("dejavu.ttf", fontsize)
     except IOError:
@@ -384,14 +376,15 @@ def on_ui_tabs():
                 with gr.Accordion("Generation Settings", open=True):
                     with gr.Row():
                         sampler_name = gr.Dropdown(label='Sampling method', choices=[s.name for s in sd_samplers.samplers], value='Euler a')
+                        
                         # --- FIX: Ensure scheduler default is a valid choice from the list ---
                         # Get a default that is guaranteed to be in the choices list
                         scheduler_choices = [s.label for s in sd_schedulers.schedulers]
-                        default_scheduler = 'Automatic'
+                        default_scheduler = 'Automatic' # Default preference
                         if 'Automatic' not in scheduler_choices and scheduler_choices:
                             default_scheduler = scheduler_choices[0] # Fallback to first available if 'Automatic' is not present
                         elif not scheduler_choices:
-                            default_scheduler = 'None' # Fallback if no schedulers are available
+                            default_scheduler = None # No schedulers available, set to None
                             
                         scheduler = gr.Dropdown(label='Schedule type', choices=scheduler_choices, value=default_scheduler)
                     with gr.Row():
@@ -461,7 +454,8 @@ def on_ui_tabs():
 
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
-            ultimate_matrix_large_batch_threshold = gr.Number(label="Large Batch Threshold (images)", value=100, precision=0) # Persistent setting
+            # This variable is now directly managed by Gradio, and its persistence is handled by the load/change events.
+            ultimate_matrix_large_batch_threshold = gr.Number(label="Large Batch Threshold (images)", value=100, precision=0)
             with gr.Blocks():
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
@@ -511,7 +505,7 @@ def on_ui_tabs():
         refresh_loras_btn.click(
             fn=update_lora_dropdowns, 
             inputs=[], 
-            outputs=lora_dropdowns # This list of outputs will now be correctly mapped due to explicit definition
+            outputs=lora_dropdowns # This list of outputs will now be correctly mapped
         )
         # --- END OF FIX ---
 
@@ -555,18 +549,11 @@ def on_ui_tabs():
             outputs=[image_display]
         )
     
-    # --- Persistence for the Large Batch Threshold ---
-    # This must be inside the gr.Blocks context as well
-    ultimate_matrix_large_batch_threshold = gr.Number(
-        label="Large Batch Threshold (images)", 
-        value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100), 
-        precision=0, 
-        elem_id="ultimate_matrix_large_batch_threshold" # Add an ID for persistence if needed
-    )
+    # --- Persistence for the Large Batch Threshold (Now correctly inside the Blocks context) ---
     ui_component.load(
         fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
         inputs=[],
-        outputs=[ultimate_matrix_large_batch_threshold],
+        outputs=[ultimate_matrix_large_batch_threshold], # Ensure this variable is defined above
         show_progress=False
     )
     ultimate_matrix_large_batch_threshold.change(

@@ -1,9 +1,9 @@
 """
-Ultimate Prompt Matrix Extension v4.6 (Final UI Hotfix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v4.4 (The Resilient Release) for AUTOMATIC1111 & Forge
 
-This is a full-fledged extension that creates its own dedicated tab in the Web UI.
-This version fixes the final NameError for the image display function, making the
-image carousel fully functional. This should be the definitive, stable version.
+This version represents a fully stable and robust extension. It fixes a critical
+NameError that prevented the UI tab from loading, ensuring all dynamic UI elements
+and functionalities work seamlessly across different Web UI environments.
 """
 
 import math
@@ -11,12 +11,13 @@ import re
 import copy
 import os
 import random
+import time
 from PIL import Image, ImageDraw, ImageFont
 from itertools import product
 
 import modules.scripts as scripts
 import gradio as gr
-from modules import images, shared, processing, sd_samplers, sd_schedulers
+from modules import images, shared, processing, sd_samplers, sd_schedulers, sd_models
 from modules.processing import process_images, Processed, StableDiffusionProcessingTxt2Img
 from modules.shared import opts, cmd_opts
 
@@ -27,8 +28,19 @@ except ImportError:
     last_info = ""
     LAST_INFO_AVAILABLE = False
 
+# --- Constants and Regex ---
+MAX_LORA_ROWS = 5
 REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
 REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
+
+# --- Helper Functions ---
+def get_lora_names():
+    try:
+        sd_models.refresh_loras()
+        return [lora.name for lora in sd_models.loras]
+    except Exception as e:
+        print(f"[Ultimate Matrix] Error getting LoRA names: {e}")
+        return ["None"]
 
 def get_font(fontsize):
     try: return ImageFont.truetype("dejavu.ttf", fontsize)
@@ -189,6 +201,7 @@ def generate_sandbox_image(
     
     return None, "Image generation failed or was interrupted."
 
+
 # --- Main Logic Function ---
 def run_matrix_processing(*args):
     all_args = list(args)
@@ -225,6 +238,7 @@ def run_matrix_processing(*args):
     if enable_dynamic_prompts:
         try: from sd_dynamic_prompts.prompt_parser import parse; dynamic_prompts_active = True; print("Dynamic Prompts extension found and enabled.")
         except ImportError: print("WARNING: Dynamic Prompts extension not found. __wildcard__ syntax will be ignored.")
+    
     all_prompts_data = []
     if is_permutation_mode:
         x_axis_match = matches.pop() if matches else None; y_axis_match = matches.pop() if matches else None; page_matches = matches
@@ -241,6 +255,7 @@ def run_matrix_processing(*args):
         for i in range(2**len(optional_tags)):
             selected_tags = [optional_tags[j] for j in range(len(optional_tags)) if (i >> j) & 1]
             all_prompts_data.append(", ".join(filter(None, [base_prompt] + selected_tags)))
+    
     final_prompts_list = []
     for i, item in enumerate(all_prompts_data):
         if is_permutation_mode:
@@ -250,17 +265,21 @@ def run_matrix_processing(*args):
             if x_axis_match: temp_prompt = temp_prompt.replace(x_axis_match.group(1), item['x'], 1)
         else: temp_prompt = item
         final_prompts_list.append(temp_prompt)
+    
     if dry_run:
         print(f"--- DRY RUN: {len(final_prompts_list)} prompts generated. ---"); [print(f"{i+1:03d}: {prompt}") for i, prompt in enumerate(final_prompts_list)]
         yield { html_log: "Dry run complete. No images generated.", image_slider: gr.Slider.update(visible=False), submit: gr.Button.update(interactive=False), generate_anyways_button: gr.Button.update(interactive=False) }
         return
+
     shared.state.job_count = len(final_prompts_list)
     final_margin_size = margin_size if margin_toggle else 0
     all_generated_images, all_infotexts = [], []
     original_seed = p.seed
+    
     for i, prompt_text in enumerate(final_prompts_list):
         if shared.state.interrupted: break
         shared.state.job = f"Image {i+1}/{shared.state.job_count}"; p_copy = copy.copy(p); p_copy.n_iter = 1; p_copy.batch_size = 1
+        
         if prompt_type_lower == "positive": p_copy.prompt = prompt_text
         elif prompt_type_lower == "negative": p_copy.negative_prompt = negative_prompt
             
@@ -359,7 +378,7 @@ def update_lora_dropdowns():
     updates = []
     for _ in range(MAX_LORA_ROWS):
         updates.append(gr.Dropdown.update(choices=lora_names))
-    return tuple(updates)
+    return tuple(updates) # Return as a tuple to unpack correctly
 
 def insert_loras_into_prompt(current_prompt, lora_row_count, *lora_args):
     lora_blocks = []
@@ -391,7 +410,7 @@ def on_ui_tabs():
                         clear_prompt_btn = gr.Button("🗑️", elem_classes=["tool"])
                         paste_prompts_btn = gr.Button("↙️", elem_classes=["tool"], tooltip="Paste prompts from last generation job")
                 with gr.Row():
-                    negative_prompt = gr.Textbox(label="Negative Prompt", lines=3, placeholder="Enter negative prompts here...")
+                    negative_prompt = gr.Textbox(label="Negative Prompt", lines=3, placeholder="Enter negative prompts here...", elem_id="matrix-neg-prompt")
                     with gr.Column(min_width=40, scale=0):
                         clear_neg_prompt_btn = gr.Button("🗑️", elem_classes=["tool"])
                 
@@ -512,6 +531,8 @@ def on_ui_tabs():
         # LoRA Builder Handlers
         add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
         refresh_loras_btn.click(fn=update_lora_dropdowns, inputs=[], outputs=lora_dropdowns)
+        
+        # New Pure Python handler for inserting loras
         lora_py_inputs_for_insertion = [prompt, lora_row_count]
         for i in range(MAX_LORA_ROWS):
             lora_py_inputs_for_insertion.extend([lora_dropdowns[i], lora_weights[i]])
@@ -535,13 +556,13 @@ def on_ui_tabs():
         submit.click(
             fn=run_matrix_processing, 
             inputs=ui_inputs_matrix_run, 
-            outputs=[image_state, image_display, html_info, html_log, image_slider, submit, generate_anyways_button], # Make sure to list these as outputs
+            outputs=[image_state, image_display, html_info, html_log, image_slider, submit, generate_anyways_button],
             show_progress="full" 
         )
         generate_anyways_button.click(
             fn=run_matrix_processing, 
             inputs=ui_inputs_matrix_run, 
-            outputs=[image_state, image_display, html_info, html_log, image_slider, submit, generate_anyways_button], # Make sure to list these as outputs
+            outputs=[image_state, image_display, html_info, html_log, image_slider, submit, generate_anyways_button],
             show_progress="full"
         )
 

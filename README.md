@@ -1,8 +1,15 @@
-# Ultimate Prompt Matrix for AUTOMATIC1111
+# Ultimate Prompt Matrix
 
-An advanced prompt matrix script for AUTOMATIC1111's Web UI, combining two powerful modes for generating prompt variations. This script is designed for both simple A/B testing and complex, multi-dimensional experiments.
+An advanced prompt matrix script for AUTOMATIC1111's Web UI and its popular forks. This script combines two powerful modes for generating prompt variations and is designed for both simple A/B testing and complex, multi-dimensional experiments.
 
 ![UI Mockup](UIMockup.png)
+
+## Compatibility
+This script is fully compatible with:
+- **AUTOMATIC1111's Stable Diffusion Web UI** (the original)
+- **SD.Next** (formerly Vladmandic's fork)
+- **Forge** (the high-performance fork by lllyasviel)
+- ...and likely any other fork that maintains the standard extension/script API.
 
 ## Features
 - **Permutation Mode:** Generates all possible substitutions from a prompt (e.g., `a <cat|dog>`). Perfect for comparing variations.
@@ -13,14 +20,14 @@ An advanced prompt matrix script for AUTOMATIC1111's Web UI, combining two power
 - **Dry Run Mode:** Validate your prompt logic and see all generated prompts *before* using GPU time.
 - **Save Prompt Log:** Optionally saves a text file of every prompt generated in a batch for your records.
 - **Descriptive Filenames:** Optionally save grids with filenames based on their page axis values for easy identification.
-- **Experimental Syntax:** Includes always-on `<random(...)>` support and can integrate with the Dynamic Prompts extension.
+- **Advanced Syntax:** Includes always-on `<random(...)>` support and can integrate with the Dynamic Prompts extension.
 - **LoRA-Safe Syntax:** The `<...>` parser is designed to ignore `<lora:...>` syntax automatically.
 
 ## Installation
 1.  On the main page of this GitHub repository, click the green **`< > Code`** button.
 2.  In the dropdown, click **"Download ZIP"**.
 3.  Unzip the downloaded file. Inside, you will find the `ultimate_prompt_matrix.py` file.
-4.  Place the `ultimate_prompt_matrix.py` file into the `scripts` folder inside your `stable-diffusion-webui` directory.
+4.  Place the `ultimate_prompt_matrix.py` file into the `scripts` folder inside your Web UI's root directory.
 5.  Restart or Reload the Web UI. The "Ultimate Prompt Matrix" will now appear in the Scripts dropdown menu.
 
 ## Usage
@@ -31,11 +38,11 @@ Select the script from the dropdown, choose your mode and settings, and write yo
 -   **Random Example:** `a <random(cat|dog|bird)>`
 
 ## Dynamic Prompts Integration (Optional)
-This script can optionally process `__wildcard__` syntax if you have the popular **sd-dynamic-prompts** extension installed and enabled in the UI.
+This script can optionally process `__wildcard__` syntax if you have the popular **sd-dynamic-prompts** extension installed and enabled in the UI. This integration works across all compatible Web UI forks.
 
 #### How to Install `sd-dynamic-prompts`
 If you don't have it, installation is simple:
-1.  In your AUTOMATIC1111 Web UI, go to the **Extensions** tab.
+1.  In your Web UI, go to the **Extensions** tab.
 2.  Click on the **Available** sub-tab.
 3.  Click the orange **"Load from:"** button.
 4.  In the search box, type `Dynamic Prompts`.

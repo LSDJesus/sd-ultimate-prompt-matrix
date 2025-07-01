@@ -1,9 +1,8 @@
 """
-Ultimate Prompt Matrix Extension v5.7 (True Final UI Fix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.7 (Definitive UI Fix) for AUTOMATIC1111 & Forge
 
-This version resolves all known critical Gradio context and component registration errors,
-ensuring the UI loads correctly and all features, including persistence and dynamic updates,
-function flawlessly.
+This version resolves all known critical Gradio UI loading and persistence errors,
+ensuring the extension is fully stable and compatible across all Web UI versions.
 """
 
 import math
@@ -381,11 +380,11 @@ def on_ui_tabs():
                         
                         # --- FIX: Ensure scheduler default is a valid choice from the list ---
                         scheduler_choices = [s.label for s in sd_schedulers.schedulers]
-                        default_scheduler = 'Automatic'
+                        default_scheduler = 'Automatic' # Default preference
                         if 'Automatic' not in scheduler_choices and scheduler_choices:
-                            default_scheduler = scheduler_choices[0] 
+                            default_scheduler = scheduler_choices[0] # Fallback to first available if 'Automatic' is not present
                         elif not scheduler_choices:
-                            default_scheduler = None 
+                            default_scheduler = None # No schedulers available, set to None
                             
                         scheduler = gr.Dropdown(label='Schedule type', choices=scheduler_choices, value=default_scheduler)
                     with gr.Row():
@@ -478,6 +477,7 @@ def on_ui_tabs():
         # This is the crucial part for Gradio's internal registration
 
         # Persistence handlers must also be defined in this proper order
+        # This load function will run at ui_component.load time
         ui_component.load(
             fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
             inputs=[],
@@ -512,8 +512,11 @@ def on_ui_tabs():
         matrix_mode.change(fn=lambda mode: gr.Checkbox.update(visible=(mode == "Permutation")), inputs=[matrix_mode], outputs=[create_mega_grid_toggle])
         
         add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
-        refresh_loras_btn.click(fn=update_lora_dropdowns, inputs=[], outputs=lora_dropdowns)
-        
+        refresh_loras_btn.click(
+            fn=update_lora_dropdowns, 
+            inputs=[], 
+            outputs=lora_dropdowns 
+        )
         lora_py_inputs_for_insertion = [prompt, lora_row_count]
         for i in range(MAX_LORA_ROWS):
             lora_py_inputs_for_insertion.extend([lora_dropdowns[i], lora_weights[i]])

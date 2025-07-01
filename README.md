@@ -2,7 +2,7 @@
 
 An advanced prompt matrix script for AUTOMATIC1111's Web UI, combining two powerful modes for generating prompt variations. This script is designed for both simple A/B testing and complex, multi-dimensional experiments.
 
-![UI Mockup](UImockup.png)
+![UI Mockup](UIMockup.png)
 
 ## Features
 - **Permutation Mode:** Generates all possible substitutions from a prompt (e.g., `a <cat|dog>`). Perfect for comparing variations.

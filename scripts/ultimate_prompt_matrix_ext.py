@@ -1,8 +1,8 @@
 """
-Ultimate Prompt Matrix Extension v5.5 (Final Context & Persistence Fix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.6 (Persistence Definition Fix) for AUTOMATIC1111 & Forge
 
-This version resolves critical Gradio context errors and ensures robust default value handling
-for schedulers and proper persistence of the Large Batch Threshold, making the extension fully stable.
+This version resolves the final critical Gradio context error related to the
+definition and persistence of the Large Batch Threshold, making the extension fully stable.
 """
 
 import math
@@ -159,13 +159,12 @@ def generate_sandbox_image(prompt, negative_prompt, seed, sampler_name, schedule
     return None, "Image generation failed or was interrupted."
 
 def run_matrix_processing(*args):
-    all_args = list(args)
     (
         prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
         matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle,
         margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames,
-        show_annotations, enable_dynamic_prompts, generate_anyways_button_component # This button state is passed as an input
-    ) = all_args[:20]
+        show_annotations, enable_dynamic_prompts, submit_button_main_component, generate_anyways_button_component
+    ) = args
 
     p = StableDiffusionProcessingTxt2Img(
         sd_model=shared.sd_model, outpath_samples=opts.outdir_txt2img_samples, outpath_grids=opts.outdir_txt2img_grids,
@@ -184,10 +183,10 @@ def run_matrix_processing(*args):
             p.prompt = master_prompt_text
             processed = process_images(p)
             yield { image_state: [processed.images], image_display: processed.images[0], html_info: processed.infotexts[0], html_log: "", image_slider: gr.Slider.update(visible=True, maximum=1, value=1),
-                    submit_button_main: gr.Button.update(interactive=True), generate_anyways_button_component: gr.Button.update(interactive=False) }
+                    submit_button_main: gr.Button.update(interactive=True), generate_anyways_button: gr.Button.update(interactive=False) }
             return
         else: 
-            yield { html_log: "No matrix syntax found in prompt.", submit_button_main: gr.Button.update(interactive=False), generate_anyways_button_component: gr.Button.update(interactive=False) }
+            yield { html_log: "No matrix syntax found in prompt.", submit_button_main: gr.Button.update(interactive=False), generate_anyways_button: gr.Button.update(interactive=False) }
             return
     dynamic_prompts_active = False
     if enable_dynamic_prompts:
@@ -195,7 +194,7 @@ def run_matrix_processing(*args):
         except ImportError: print("WARNING: Dynamic Prompts extension not found. __wildcard__ syntax will be ignored.")
     all_prompts_data = []
     if is_permutation_mode:
-        x_axis_match = matches.pop() if matches else None; y_axis_match = matches.pop() if matches else None; page_matches = matches
+        x_axis_match = matches[-1] if matches else None; y_axis_match = matches[-2] if len(matches) > 1 else None; page_matches = matches[:-2] if len(matches) > 1 else []
         x_options = [opt.strip() for opt in x_axis_match.group(2).split("|")] if x_axis_match else [""]
         y_options = [opt.strip() for opt in y_axis_match.group(2).split("|")] if y_axis_match else [""]
         page_options_list = [[opt.strip() for opt in m.group(2).split("|")] for m in page_matches]
@@ -220,7 +219,7 @@ def run_matrix_processing(*args):
         final_prompts_list.append(temp_prompt)
     if dry_run:
         print(f"--- DRY RUN: {len(final_prompts_list)} prompts generated. ---"); [print(f"{i+1:03d}: {prompt}") for i, prompt in enumerate(final_prompts_list)]
-        yield { html_log: "Dry run complete. No images generated.", image_slider: gr.Slider.update(visible=False), submit_button_main: gr.Button.update(interactive=False), generate_anyways_button_component: gr.Button.update(interactive=False) }
+        yield { html_log: "Dry run complete. No images generated.", image_slider: gr.Slider.update(visible=False), submit_button_main: gr.Button.update(interactive=False), generate_anyways_button: gr.Button.update(interactive=False) }
         return
     
     shared.state.job_count = len(final_prompts_list)
@@ -256,7 +255,7 @@ def run_matrix_processing(*args):
             html_log: f"Generated {len(all_generated_images)} of {len(final_prompts_list)} images.", 
             image_slider: gr.Slider.update(visible=True, maximum=len(all_generated_images), value=len(all_generated_images)),
             submit_button_main: gr.Button.update(interactive=False), # Keep submit disabled during generation
-            generate_anyways_button_component: gr.Button.update(interactive=False) # Keep generate anyways disabled during generation
+            generate_anyways_button: gr.Button.update(interactive=False) # Keep generate anyways disabled during generation
         }
 
     if shared.state.interrupted: print("Matrix generation interrupted by user.")
@@ -316,7 +315,7 @@ def run_matrix_processing(*args):
         html_log: f"Generated {len(all_generated_images)} of {len(final_prompts_list)} images. Done!",
         image_slider: gr.Slider.update(visible=True, maximum=len(final_images), value=1),
         submit_button_main: gr.Button.update(interactive=True), # Re-enable submit after completion
-        generate_anyways_button_component: gr.Button.update(interactive=False) # Keep generate anyways disabled after completion
+        generate_anyways_button: gr.Button.update(interactive=False) # Keep generate anyways disabled after completion
     }
 
 # --- UI Functions (Callbacks) ---
@@ -454,8 +453,9 @@ def on_ui_tabs():
 
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
-            # This variable is now directly managed by Gradio, and its persistence is handled by the load/change events.
+            # --- FIX: Define ultimate_matrix_large_batch_threshold INSIDE the Blocks context ---
             ultimate_matrix_large_batch_threshold = gr.Number(label="Large Batch Threshold (images)", value=100, precision=0)
+            # --- END FIX ---
             with gr.Blocks():
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
@@ -501,14 +501,11 @@ def on_ui_tabs():
         
         # LoRA Builder Handlers
         add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
-        # --- THE FIX IS HERE ---
         refresh_loras_btn.click(
             fn=update_lora_dropdowns, 
             inputs=[], 
-            outputs=lora_dropdowns # This list of outputs will now be correctly mapped
+            outputs=lora_dropdowns # This list of outputs will now be correctly mapped due to explicit definition
         )
-        # --- END OF FIX ---
-
         lora_py_inputs_for_insertion = [prompt, lora_row_count]
         for i in range(MAX_LORA_ROWS):
             lora_py_inputs_for_insertion.extend([lora_dropdowns[i], lora_weights[i]])
@@ -553,7 +550,7 @@ def on_ui_tabs():
     ui_component.load(
         fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
         inputs=[],
-        outputs=[ultimate_matrix_large_batch_threshold], # Ensure this variable is defined above
+        outputs=[ultimate_matrix_large_batch_threshold],
         show_progress=False
     )
     ultimate_matrix_large_batch_threshold.change(

@@ -341,7 +341,7 @@ def on_ui_tabs():
                 save_prompt_list = gr.Checkbox(label="Save prompt list to a text file", value=False)
 
         with gr.Accordion("Advanced Features", open=False):
-            dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts)", value=False)
+            dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
             with gr.Blocks():
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")

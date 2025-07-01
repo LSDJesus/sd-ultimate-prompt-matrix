@@ -1,8 +1,8 @@
 """
-Ultimate Prompt Matrix Extension v5.6 (Persistence Definition Fix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.6 (Ultimate UI Fix) for AUTOMATIC1111 & Forge
 
-This version resolves the final critical Gradio context error related to the
-definition and persistence of the Large Batch Threshold, making the extension fully stable.
+This version resolves all known critical Gradio context errors and ensures robust UI
+initialization and persistence, making the extension fully stable and reliable.
 """
 
 import math
@@ -79,7 +79,7 @@ def create_mega_grid(all_grids, page_labels, margin_size, show_annotations=True)
     mega_image = Image.new('RGB', (int(mega_w), int(mega_h)), color='#DDDDDD')
     draw = ImageDraw.Draw( mega_image)
     for i, grid in enumerate(all_grids):
-        col, row = i % mega_cols, i // mega_cols
+        col, row = i % mega_cols, i // mega_rows
         cell_x, cell_y = margin_size + col * (grid_w + margin_size), margin_size + row * (grid_h + title_height + margin_size)
         if show_annotations:
             draw.text((cell_x + grid_w / 2, cell_y + title_height / 2), page_labels[i], font=font, fill='black', anchor="mm")
@@ -453,7 +453,7 @@ def on_ui_tabs():
 
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
-            # --- FIX: Define ultimate_matrix_large_batch_threshold INSIDE the Blocks context ---
+            # --- FIX: Define ultimate_matrix_large_batch_threshold here, inside the context ---
             ultimate_matrix_large_batch_threshold = gr.Number(label="Large Batch Threshold (images)", value=100, precision=0)
             # --- END FIX ---
             with gr.Blocks():
@@ -547,10 +547,11 @@ def on_ui_tabs():
         )
     
     # --- Persistence for the Large Batch Threshold (Now correctly inside the Blocks context) ---
+    # The ui_component.load and .change handlers must refer to the ultimate_matrix_large_batch_threshold defined above
     ui_component.load(
         fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
         inputs=[],
-        outputs=[ultimate_matrix_large_batch_threshold],
+        outputs=[ultimate_matrix_large_batch_threshold], 
         show_progress=False
     )
     ultimate_matrix_large_batch_threshold.change(

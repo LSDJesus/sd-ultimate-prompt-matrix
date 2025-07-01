@@ -1,5 +1,5 @@
 """
-Ultimate Prompt Matrix Extension v5.3 (LoRA Loader Definitive Fix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.4 (LoRA Loader Definitive Fix) for AUTOMATIC1111 & Forge
 
 This version fixes the persistent LoRA dropdown population issue by using an explicit
 multi-output update strategy, ensuring reliability.
@@ -136,6 +136,7 @@ def calculate_batch_size_and_time(
     base_pixels = 512 * 512; current_pixels = width * height; scaling_factor = current_pixels / base_pixels
     estimated_s_per_image = base_speed_512x512 * scaling_factor
     total_estimated_seconds = estimated_s_per_image * total_images
+
     minutes, seconds = divmod(total_estimated_seconds, 60); hours, minutes = divmod(minutes, 60)
     time_str = [];
     if hours > 0: time_str.append(f"{int(hours)}h")
@@ -171,7 +172,7 @@ def run_matrix_processing(*args):
         prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
         matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle,
         margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames,
-        show_annotations, enable_dynamic_prompts, generate_anyways_button_component # Pass the component to update its state
+        show_annotations, enable_dynamic_prompts, generate_anyways_button_component # This button state is passed as an input
     ) = all_args[:20]
 
     p = StableDiffusionProcessingTxt2Img(
@@ -344,7 +345,7 @@ def update_lora_dropdowns():
     updates = []
     for _ in range(MAX_LORA_ROWS):
         updates.append(gr.Dropdown.update(choices=lora_names))
-    return tuple(updates) # Return as a tuple to unpack correctly
+    return tuple(updates) # This now works because the outputs are explicitly defined below
 
 def insert_loras_into_prompt(current_prompt, lora_row_count, *lora_args):
     lora_blocks = []
@@ -376,7 +377,7 @@ def on_ui_tabs():
                         clear_prompt_btn = gr.Button("🗑️", elem_classes=["tool"])
                         paste_prompts_btn = gr.Button("↙️", elem_classes=["tool"], tooltip="Paste prompts from last generation job")
                 with gr.Row():
-                    negative_prompt = gr.Textbox(label="Negative Prompt", lines=3, placeholder="Enter negative prompts here...")
+                    negative_prompt = gr.Textbox(label="Negative Prompt", lines=3, placeholder="Enter negative prompts here...", elem_id="matrix-neg-prompt")
                     with gr.Column(min_width=40, scale=0):
                         clear_neg_prompt_btn = gr.Button("🗑️", elem_classes=["tool"])
                 
@@ -402,7 +403,7 @@ def on_ui_tabs():
                             weight = gr.Slider(minimum=-2.0, maximum=2.0, value=1.0, step=0.05, label="Weight")
                             lora_rows.append(row); lora_dropdowns.append(dropdown); lora_weights.append(weight)
                     with gr.Row():
-                        add_lora_btn = gr.Button("[+] Add LoRA Block")
+                        add_lora_btn = gr.Button(f"[+] Add LoRA Block (Max: {MAX_LORA_ROWS})")
                         insert_loras_btn = gr.Button("Insert LoRAs into Prompt", variant="primary")
                         lora_row_count = gr.State(1)
 
@@ -451,6 +452,7 @@ def on_ui_tabs():
 
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
+            ultimate_matrix_large_batch_threshold = gr.Number(label="Large Batch Threshold (images)", value=100, precision=0) # Persistent setting
             with gr.Blocks():
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
@@ -473,7 +475,7 @@ def on_ui_tabs():
             prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
             matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, 
             margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, 
-            show_annotations, enable_dynamic_prompts, generate_anyways_button # Pass the component to update its state
+            show_annotations, enable_dynamic_prompts, submit_button_main, generate_anyways_button # Pass these buttons to update their own states
         ]
 
         # --- Define UI inputs for calculate_batch_size_and_time ---
@@ -496,8 +498,14 @@ def on_ui_tabs():
         
         # LoRA Builder Handlers
         add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
-        refresh_loras_btn.click(fn=update_lora_dropdowns, inputs=[], outputs=lora_dropdowns) # This is the line that will now work correctly
-        
+        # --- THE FIX IS HERE ---
+        refresh_loras_btn.click(
+            fn=update_lora_dropdowns, 
+            inputs=[], 
+            outputs=lora_dropdowns # This list of outputs will now be correctly mapped
+        )
+        # --- END OF FIX ---
+
         lora_py_inputs_for_insertion = [prompt, lora_row_count]
         for i in range(MAX_LORA_ROWS):
             lora_py_inputs_for_insertion.extend([lora_dropdowns[i], lora_weights[i]])
@@ -538,6 +546,20 @@ def on_ui_tabs():
             outputs=[image_display]
         )
     
+    # --- Persistence for the Large Batch Threshold ---
+    ui_component.load(
+        fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
+        inputs=[],
+        outputs=[ultimate_matrix_large_batch_threshold],
+        show_progress=False
+    )
+    ultimate_matrix_large_batch_threshold.change(
+        fn=lambda x: setattr(shared.opts, 'ultimate_matrix_large_batch_threshold', x),
+        inputs=[ultimate_matrix_large_batch_threshold],
+        outputs=[],
+        show_progress=False
+    )
+
     return [(ui_component, "Ultimate Matrix", "ultimate_matrix")]
 
 scripts.script_callbacks.on_ui_tabs(on_ui_tabs)

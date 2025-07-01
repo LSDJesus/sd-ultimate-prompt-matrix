@@ -1,9 +1,8 @@
 """
-Ultimate Prompt Matrix Extension v2.9 for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v3.1 (Compatibility Release) for AUTOMATIC1111 & Forge
 
 This is a full-fledged extension that creates its own dedicated tab in the Web UI.
-It combines two powerful modes for prompt variation and includes advanced features
-for power users, such as dry runs, file logging, and experimental syntax.
+This version fixes a critical import issue to ensure compatibility with all Web UI versions.
 """
 
 import math
@@ -18,11 +17,7 @@ import modules.scripts as scripts
 import gradio as gr
 from modules import images, shared, processing
 from modules.processing import process_images, Processed, StableDiffusionProcessingTxt2Img
-from modules.shared import opts, cmd_opts, last_info
-
-# --- Regex Definitions ---
-REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
-REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
+from modules.shared import opts, cmd_opts
 
 # --- Helper Functions (Unchanged) ---
 def get_font(fontsize):
@@ -89,33 +84,31 @@ def get_current_settings():
     return f"**Model:** {model_name}  \n**Sampler:** {sampler}  \n**Steps:** {steps}  \n**CFG Scale:** {cfg}  \n**Size:** {width}x{height}"
 
 def paste_last_prompts():
-    if not last_info: return "", ""
-    neg_prompt_match = re.search(r'Negative prompt: (.+?)(?=\nSteps:)', last_info, re.DOTALL)
-    neg_prompt = neg_prompt_match.group(1).strip() if neg_prompt_match else ""
-    pos_prompt = last_info.split('Negative prompt:')[0].strip()
-    return pos_prompt, neg_prompt
+    # THE ROBUST FIX: Check if 'last_info' exists on the 'shared' module before accessing.
+    if hasattr(shared, 'last_info') and shared.last_info:
+        info_text = shared.last_info
+        neg_prompt_match = re.search(r'Negative prompt: (.+?)(?=\nSteps:)', info_text, re.DOTALL)
+        neg_prompt = neg_prompt_match.group(1).strip() if neg_prompt_match else ""
+        pos_prompt = info_text.split('Negative prompt:')[0].strip()
+        return pos_prompt, neg_prompt
+    return "", ""
 
 def run_matrix_processing(*args):
-    (
-        prompt, negative_prompt,
-        matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle,
-        margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames,
-        show_annotations, enable_dynamic_prompts
-    ) = args
-
-    p = StableDiffusionProcessingTxt2Img(sd_model=shared.sd_model, outpath_samples=opts.outdir_txt2img_samples, outpath_grids=opts.outdir_txt2img_grids, prompt=prompt, negative_prompt=negative_prompt, seed=-1, sampler_name=opts.sampler_name, steps=opts.steps, cfg_scale=opts.cfg_scale, width=opts.width, height=opts.height, batch_size=1, n_iter=1)
+    # This function's logic remains the same, as the fixes are in the UI and helper functions
+    (prompt, negative_prompt, matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, show_annotations, enable_dynamic_prompts) = args
+    p = StableDiffusionProcessingTxt2Img(sd_model=shared.sd_model, outpath_samples=opts.outdir_txt2img_samples, outpath_grids=opts.outdir_txt2img_grids)
+    p.prompt = prompt; p.negative_prompt = negative_prompt; p.seed = -1; p.sampler_name = opts.sampler_name
+    p.steps = opts.steps; p.cfg_scale = opts.cfg_scale; p.width = opts.width; p.height = opts.height
+    p.batch_size = 1; p.n_iter = 1
     processing.fix_seed(p)
     is_permutation_mode = (matrix_mode == "Permutation")
-    
-    # Use .lower() to handle capitalized labels from the UI
     prompt_type_lower = prompt_type.lower()
     if prompt_type_lower == "positive" or prompt_type_lower == "both": master_prompt_text_unresolved = p.prompt
     else: master_prompt_text_unresolved = p.negative_prompt
-    
-    master_prompt_text = re.sub(REX_RANDOM, lambda m: random.choice(m.group(1).split('|')).strip(), master_prompt_text_unresolved)
-    matches = list(REX_MATRIX.finditer(master_prompt_text))
+    master_prompt_text = re.sub(r'<random\(([^)]+)\)>', lambda m: random.choice(m.group(1).split('|')).strip(), master_prompt_text_unresolved)
+    matches = list(re.compile(r'(<(?!lora:)([^>]+)>)').finditer(master_prompt_text))
     if not matches:
-        if re.search(REX_RANDOM, master_prompt_text_unresolved): p.prompt = master_prompt_text; return process_images(p)
+        if re.search(r'<random\(([^)]+)\)>', master_prompt_text_unresolved): p.prompt = master_prompt_text; return process_images(p)
         else: return process_images(p)
     dynamic_prompts_active = False
     if enable_dynamic_prompts:
@@ -132,7 +125,7 @@ def run_matrix_processing(*args):
             for y_val in y_options:
                 for x_val in x_options: all_prompts_data.append({'x': x_val, 'y': y_val, 'page': page_values})
     else:
-        base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(REX_MATRIX, '', master_prompt_text).split(',')]))
+        base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(r'(<(?!lora:)([^>]+)>)', '', master_prompt_text).split(',')]))
         optional_tags = [m.group(2).strip() for m in matches]
         for i in range(2**len(optional_tags)):
             selected_tags = [optional_tags[j] for j in range(len(optional_tags)) if (i >> j) & 1]
@@ -164,7 +157,7 @@ def run_matrix_processing(*args):
                 if y_axis_match: temp_neg = temp_neg.replace(y_axis_match.group(1), data['y'], 1)
                 if x_axis_match: temp_neg = temp_neg.replace(x_axis_match.group(1), data['x'], 1)
             else:
-                base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(REX_MATRIX, '', master_prompt_text).split(',')]))
+                base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(r'(<(?!lora:)([^>]+)>)', '', master_prompt_text).split(',')]))
                 added_tags = prompt_text.replace(base_prompt, "").strip(", "); temp_neg = ", ".join(filter(None, [original_negative_prompt, added_tags]))
             p_copy.negative_prompt = temp_neg
         if dynamic_prompts_active: p_copy.prompt = parse(p_copy.prompt)
@@ -216,12 +209,10 @@ def run_matrix_processing(*args):
     infotext = all_infotexts[0] if all_infotexts else ""
     return final_images, infotext, f"Generated {len(final_prompts_list)} images.", get_current_settings()
 
-# --- UI Creation Function ---
 def on_ui_tabs():
     with gr.Blocks(analytics_enabled=False) as ui_component:
         gr.Markdown("# Ultimate Prompt Matrix")
         gr.Markdown("A standalone tool for generating complex image grids using permutation, combination, or random syntax.")
-        
         with gr.Row(equal_height=False):
             with gr.Column(scale=2, variant="panel"):
                 gr.Markdown("### Prompts")
@@ -234,18 +225,15 @@ def on_ui_tabs():
                     negative_prompt = gr.Textbox(label="Negative Prompt", lines=4, placeholder="Enter negative prompts here...")
                     with gr.Column(min_width=40, scale=0):
                         clear_neg_prompt_btn = gr.Button("🗑️", elem_classes=["tool"])
-                
                 gr.Markdown("### Core Settings")
                 matrix_mode = gr.Radio(["Permutation", "Combination"], label="Matrix Mode", value="Permutation", info="Permutation: <cat|dog>. Combination: <tag1>, <tag2>.")
                 prompt_type = gr.Radio(["Positive", "Negative", "Both"], label="Matrix prompt target", value="Positive")
                 different_seeds = gr.Checkbox(label='Use different seed for each image', value=True)
-            
             with gr.Column(scale=1, variant="panel"):
                 with gr.Row():
                     gr.Markdown("### Current Settings")
                     refresh_settings_btn = gr.Button("🔃", elem_classes=["tool"], title="Refresh current settings display")
                 settings_display = gr.Markdown("Click Refresh to view settings from the txt2img tab.")
-                
                 gr.Markdown("### Output & Grid Control")
                 show_annotations = gr.Checkbox(label="Show grid labels & titles", value=True)
                 margin_toggle = gr.Checkbox(label="Enable Grid Margins", value=True)
@@ -253,37 +241,23 @@ def on_ui_tabs():
                 create_mega_grid_toggle = gr.Checkbox(label="Create a 'Mega-Grid' (Permutation mode)", value=True, visible=True)
                 use_descriptive_filenames = gr.Checkbox(label="Use descriptive filenames for grids", value=False)
                 save_prompt_list = gr.Checkbox(label="Save prompt list to a text file", value=False)
-
         with gr.Accordion("Optional & Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts)", value=False)
             with gr.Blocks():
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
-
         submit = gr.Button("Generate", variant="primary")
-
-        with gr.Row():
-            gallery = gr.Gallery(label="Generated images", show_label=False, elem_id="matrix_gallery", columns=4, height="auto")
-        
+        with gr.Row(): gallery = gr.Gallery(label="Generated images", show_label=False, elem_id="matrix_gallery", columns=4, height="auto")
         with gr.Row():
             html_info = gr.HTML()
             html_log = gr.HTML()
-            
-        ui_inputs = [
-            prompt, negative_prompt, matrix_mode, prompt_type, different_seeds, 
-            margin_size, create_mega_grid_toggle, margin_toggle, dry_run, save_prompt_list, 
-            use_descriptive_filenames, show_annotations, enable_dynamic_prompts
-        ]
-        
+        ui_inputs = [prompt, negative_prompt, matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, show_annotations, enable_dynamic_prompts]
         clear_prompt_btn.click(fn=lambda: "", inputs=[], outputs=[prompt])
         clear_neg_prompt_btn.click(fn=lambda: "", inputs=[], outputs=[negative_prompt])
         refresh_settings_btn.click(fn=get_current_settings, inputs=[], outputs=[settings_display])
         paste_prompts_btn.click(fn=paste_last_prompts, inputs=[], outputs=[prompt, negative_prompt])
-        
         margin_toggle.change(fn=lambda x: gr.Slider.update(visible=x), inputs=[margin_toggle], outputs=[margin_size])
         matrix_mode.change(fn=lambda mode: gr.Checkbox.update(visible=(mode == "Permutation")), inputs=[matrix_mode], outputs=[create_mega_grid_toggle])
         submit.click(fn=run_matrix_processing, inputs=ui_inputs, outputs=[gallery, html_info, html_log, settings_display])
-    
     return [(ui_component, "Ultimate Matrix", "ultimate_matrix")]
-
 scripts.script_callbacks.on_ui_tabs(on_ui_tabs)

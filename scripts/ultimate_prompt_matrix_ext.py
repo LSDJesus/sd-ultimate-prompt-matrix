@@ -33,7 +33,7 @@ MAX_LORA_ROWS = 5
 REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
 REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
 
-# --- Helper Functions ---
+# --- Helper Functions (unchanged) ---
 def get_font(fontsize):
     try: return ImageFont.truetype("dejavu.ttf", fontsize)
     except IOError:
@@ -360,6 +360,28 @@ def on_ui_tabs():
     global lora_rows, lora_row_count, submit_button_main, generate_anyways_button, ultimate_matrix_large_batch_threshold
     
     with gr.Blocks(analytics_enabled=False) as ui_component:
+        # --- Define persisted components and their load/change handlers FIRST ---
+        # This is the key. Define components that need 'load' interaction first.
+        ultimate_matrix_large_batch_threshold = gr.Number(
+            label="Large Batch Threshold (images)",
+            value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100),
+            precision=0
+        )
+        # ui_component.load handler for persistence
+        ui_component.load(
+            fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
+            inputs=[],
+            outputs=[ultimate_matrix_large_batch_threshold], 
+            show_progress=False
+        )
+        # Change handler for persistence
+        ultimate_matrix_large_batch_threshold.change(
+            fn=lambda x: setattr(shared.opts, 'ultimate_matrix_large_batch_threshold', x),
+            inputs=[ultimate_matrix_large_batch_threshold],
+            outputs=[],
+            show_progress=False
+        )
+
         gr.Markdown("# Ultimate Prompt Matrix")
         gr.Markdown("A standalone tool for generating complex image grids using permutation, combination, or random syntax.")
         with gr.Row(equal_height=False):
@@ -381,18 +403,19 @@ def on_ui_tabs():
                         sampler_choices = [s.name for s in sd_samplers.samplers]
                         default_sampler_value = opts.data.get('sd_sampler_name', opts.data.get('sampler_name', 'Euler a'))
                         if default_sampler_value not in sampler_choices and sampler_choices:
-                            default_sampler_value = sampler_choices[0]
+                            default_sampler_value = sampler_choices[0] # Fallback to first available if default not present
                         elif not sampler_choices:
-                            default_sampler_value = 'None' # If no samplers are loaded at all
+                            default_sampler_value = None # If no samplers are loaded at all
                         sampler_name = gr.Dropdown(label='Sampling method', choices=sampler_choices, value=default_sampler_value)
                         
                         # --- Scheduler Setup ---
                         scheduler_choices = [s.label for s in sd_schedulers.schedulers]
                         default_scheduler_value = opts.data.get('sd_scheduler', opts.data.get('scheduler_name', 'Automatic'))
                         if default_scheduler_value not in scheduler_choices and scheduler_choices:
-                            default_scheduler_value = scheduler_choices[0]
+                            default_scheduler_value = scheduler_choices[0] # Fallback to first available if default not present
                         elif not scheduler_choices:
-                            default_scheduler_value = 'None' # If no schedulers are loaded at all
+                            default_scheduler_value = None # If no schedulers are loaded at all
+                            
                         scheduler = gr.Dropdown(label='Schedule type', choices=scheduler_choices, value=default_scheduler_value)
                     with gr.Row():
                         steps = gr.Slider(label='Sampling steps', minimum=1, maximum=150, value=20, step=1)
@@ -461,13 +484,13 @@ def on_ui_tabs():
 
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
-            ultimate_matrix_large_batch_threshold = gr.Number(label="Large Batch Threshold (images)", value=100, precision=0)
-            with gr.Blocks(): # This inner Blocks seems redundant but is preserved as per previous structure
+            # ultimate_matrix_large_batch_threshold is defined and hooked up at the top
+            with gr.Blocks():
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
         
         # Main Generate Buttons (Controlled by calculation)
-        submit_button_main = gr.Button("Generate", variant="primary", interactive=False)
+        submit = gr.Button("Generate", variant="primary", interactive=False)
         generate_anyways_button = gr.Button("Generate Anyways", variant="stop", interactive=False)
 
         with gr.Blocks():
@@ -481,26 +504,12 @@ def on_ui_tabs():
         # --- ALL EVENT HANDLERS DEFINED AFTER ALL COMPONENTS ARE DEFINED ---
         # This is the crucial part for Gradio's internal registration
 
-        # Persistence handlers must also be defined in this proper order
-        ui_component.load(
-            fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
-            inputs=[],
-            outputs=[ultimate_matrix_large_batch_threshold], 
-            show_progress=False
-        )
-        ultimate_matrix_large_batch_threshold.change(
-            fn=lambda x: setattr(shared.opts, 'ultimate_matrix_large_batch_threshold', x),
-            inputs=[ultimate_matrix_large_batch_threshold],
-            outputs=[],
-            show_progress=False
-        )
-
         # Standard UI Input List for run_matrix_processing
         ui_inputs_matrix_run = [
             prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
             matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, 
             margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, 
-            show_annotations, enable_dynamic_prompts, submit_button_main, generate_anyways_button 
+            show_annotations, enable_dynamic_prompts, submit, generate_anyways_button # Pass these buttons to update their own states
         ]
 
         # Inputs for calculate_batch_size_and_time
@@ -529,7 +538,7 @@ def on_ui_tabs():
         calculate_btn.click(
             fn=calculate_batch_size_and_time,
             inputs=ui_inputs_calculate_batch,
-            outputs=[calculation_results_display, submit_button_main, generate_anyways_button]
+            outputs=[calculation_results_display, submit, generate_anyways_button]
         )
 
         generate_sandbox_btn.click(
@@ -538,16 +547,16 @@ def on_ui_tabs():
             outputs=[sandbox_image_display, sandbox_log_display]
         )
 
-        submit_button_main.click(
+        submit.click(
             fn=run_matrix_processing, 
             inputs=ui_inputs_matrix_run, 
-            outputs=[image_state, image_display, html_info, html_log, image_slider, submit_button_main, generate_anyways_button],
+            outputs=[image_state, image_display, html_info, html_log, image_slider, submit, generate_anyways_button],
             show_progress="full" 
         )
         generate_anyways_button.click(
             fn=run_matrix_processing, 
             inputs=ui_inputs_matrix_run, 
-            outputs=[image_state, image_display, html_info, html_log, image_slider, submit_button_main, generate_anyways_button],
+            outputs=[image_state, image_display, html_info, html_log, image_slider, submit, generate_anyways_button],
             show_progress="full"
         )
 

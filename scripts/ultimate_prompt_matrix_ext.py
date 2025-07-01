@@ -1,9 +1,9 @@
 """
-Ultimate Prompt Matrix Extension v5.1 (LoRA Hotfix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.2 (LoRA Loader Fix) for AUTOMATIC1111 & Forge
 
-This version fixes a critical timing issue where the LoRA dropdowns would not populate
-on startup. A "Refresh LoRAs" button has been added to load the list on-demand,
-ensuring compatibility and reliability across all Web UI versions.
+This version fixes a critical Gradio bug where the LoRA dropdowns would not populate.
+The return value from the update function is now correctly unpacked, ensuring the UI
+updates as expected. This should be the final, stable version.
 """
 
 import math
@@ -32,11 +32,9 @@ MAX_LORA_ROWS = 5
 REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
 REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
 
-# --- Helper Functions (Unchanged, but get_lora_names is now called differently) ---
+# --- Helper Functions ---
 def get_lora_names():
-    """Returns a list of all available LoRA model names."""
     try:
-        # Re-scan the loras folder every time this is called to ensure it's up to date
         sd_models.refresh_loras()
         return [lora.name for lora in sd_models.loras]
     except Exception as e:
@@ -49,7 +47,6 @@ def get_font(fontsize):
         try: return ImageFont.truetype("arial.ttf", fontsize)
         except IOError: return ImageFont.load_default()
 
-# --- All other helper functions (draw_grid, create_mega_grid, etc.) are unchanged ---
 def draw_grid_with_annotations(grid_images, x_labels, y_labels, margin_size, title="", show_annotations=True):
     if not grid_images or not any(grid_images): return None
     num_cols = len(x_labels) if x_labels else math.ceil(math.sqrt(len(grid_images)))
@@ -110,24 +107,19 @@ def paste_last_prompts():
         return pos_prompt, neg_prompt
     return "Could not find last generation info.", ""
 
-# --- Main Logic Function ---
 def run_matrix_processing(*args):
-    # This now uses a generator `yield` to give live feedback
     all_args = list(args)
-    # The LoRA components are at the end, we don't need them here, just the main settings
     (
         prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
         matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle,
         margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames,
         show_annotations, enable_dynamic_prompts
     ) = all_args[:19]
-
     p = StableDiffusionProcessingTxt2Img(
         sd_model=shared.sd_model, outpath_samples=opts.outdir_txt2img_samples, outpath_grids=opts.outdir_txt2img_grids,
         prompt=prompt, negative_prompt=negative_prompt, seed=-1, sampler_name=sampler_name, scheduler=scheduler,
         steps=steps, cfg_scale=cfg_scale, width=width, height=height, batch_size=1, n_iter=1,
     )
-    # The rest of this function is unchanged
     processing.fix_seed(p)
     is_permutation_mode = (matrix_mode == "Permutation")
     prompt_type_lower = prompt_type.lower()
@@ -248,7 +240,6 @@ def run_matrix_processing(*args):
     final_images.extend(all_grid_images); final_images.extend(all_generated_images)
     yield { image_state: final_images, image_slider: gr.Slider.update(maximum=len(final_images), value=1), image_display: final_images[0] }
 
-# --- UI Functions ---
 def update_image_display(slider_value, image_list):
     if image_list and 0 < slider_value <= len(image_list):
         return image_list[int(slider_value) - 1]
@@ -261,17 +252,16 @@ def add_lora_row(current_count):
         updates[lora_rows[i]] = gr.Row.update(visible=(i < current_count))
     return updates
 
-# --- THE FIX IS HERE ---
 def update_lora_dropdowns():
-    """Gets the fresh list of LoRAs and returns updates for all dropdowns."""
     lora_names = get_lora_names()
     updates = []
     for _ in range(MAX_LORA_ROWS):
         updates.append(gr.Dropdown.update(choices=lora_names))
-    return updates
+    # --- THE FIX IS HERE ---
+    return tuple(updates) # Return as a tuple to unpack correctly
 
 def on_ui_tabs():
-    global lora_rows, lora_row_count # Make these globally accessible for the helper
+    global lora_rows, lora_row_count
     
     with gr.Blocks(analytics_enabled=False) as ui_component:
         gr.Markdown("# Ultimate Prompt Matrix")
@@ -302,12 +292,11 @@ def on_ui_tabs():
 
                 with gr.Accordion("LoRA Matrix Builder", open=False):
                     with gr.Row():
-                        gr.Markdown("Click Refresh to load your LoRA models.")
+                        gr.Markdown("Click Refresh to load your LoRA models into the dropdowns below.")
                         refresh_loras_btn = gr.Button("🔃 Refresh LoRAs", elem_classes="tool")
                     lora_rows, lora_dropdowns, lora_weights = [], [], []
                     for i in range(MAX_LORA_ROWS):
                         with gr.Row(visible=(i==0), elem_classes="lora-row") as row:
-                            # Start with an empty list of choices
                             dropdown = gr.Dropdown([], multiselect=True, label=f"LoRA Block {i+1}")
                             weight = gr.Slider(minimum=-2.0, maximum=2.0, value=1.0, step=0.05, label="Weight")
                             lora_rows.append(row); lora_dropdowns.append(dropdown); lora_weights.append(weight)
@@ -371,7 +360,6 @@ def on_ui_tabs():
         }
         """
         
-        # --- Event Handlers ---
         add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
         refresh_loras_btn.click(fn=update_lora_dropdowns, inputs=[], outputs=lora_dropdowns)
         

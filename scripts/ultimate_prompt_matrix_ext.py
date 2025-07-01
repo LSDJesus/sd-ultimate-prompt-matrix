@@ -1,8 +1,8 @@
 """
-Ultimate Prompt Matrix Extension v4.5 (LoRA Loader & Cold Start Robustness) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.3 (LoRA Loader Fix Finalized) for AUTOMATIC1111 & Forge
 
-This version represents a fully stable and robust extension. It fixes the critical LoRA dropdown
-population issue and enhances the Single Image Sandbox to gracefully handle initial model loading failures.
+This version provides the definitive fix for the persistent LoRA dropdown population issue,
+ensuring that available LoRA models are correctly loaded and displayed after refresh.
 """
 
 import math
@@ -34,12 +34,43 @@ REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
 
 # --- Helper Functions ---
 def get_lora_names():
+    """Returns a list of all available LoRA model names, with robust checks."""
+    print("[Ultimate Matrix] get_lora_names() called.")
     try:
+        # Step 1: Force a refresh of A1111's internal LoRA list
+        print("[Ultimate Matrix] Calling sd_models.refresh_loras()...")
         sd_models.refresh_loras()
-        return [lora.name for lora in sd_models.loras]
+        
+        # Step 2: Try to read from A1111's internal list
+        lora_objects_from_sd_models = sd_models.loras
+        lora_names = [lora.name for lora in lora_objects_from_sd_models]
+        lora_names.sort()
+        
+        if not lora_names:
+            print("[Ultimate Matrix] sd_models.loras is empty after refresh. Attempting manual scan as fallback.")
+            # Step 3: Fallback - manual scan of lora_dir if internal list is empty
+            lora_dir_paths = shared.opts.data.get('lora_dir', '').split(',')
+            manual_lora_names = []
+            if lora_dir_paths:
+                for l_dir in lora_dir_paths:
+                    l_dir = l_dir.strip()
+                    if l_dir and os.path.isdir(l_dir):
+                        print(f"[Ultimate Matrix] Manually scanning: {l_dir}")
+                        for root, _, files in os.walk(l_dir):
+                            for file in files:
+                                if file.endswith((".safetensors", ".ckpt")):
+                                    relative_path = os.path.relpath(os.path.join(root, file), l_dir)
+                                    manual_lora_names.append(os.path.splitext(relative_path)[0])
+                manual_lora_names = sorted(list(set(manual_lora_names))) # Remove duplicates and sort
+                if manual_lora_names:
+                    print(f"[Ultimate Matrix] Manually found {len(manual_lora_names)} LoRAs: {manual_lora_names[:5]}...")
+                    return manual_lora_names
+
+        print(f"[Ultimate Matrix] Returning {len(lora_names)} LoRAs: {lora_names[:5]}..." if lora_names else "[Ultimate Matrix] Returning empty list.")
+        return lora_names
     except Exception as e:
-        print(f"[Ultimate Matrix] Error getting LoRA names: {e}")
-        return ["None"]
+        print(f"[Ultimate Matrix] Error in get_lora_names: {e}")
+        return ["None (Error during LoRA scan)"]
 
 def get_font(fontsize):
     try: return ImageFont.truetype("dejavu.ttf", fontsize)
@@ -328,14 +359,12 @@ def run_matrix_processing(*args):
     else:
         grid_image = draw_grid_with_annotations(all_generated_images, [], [], final_margin_size, show_annotations=show_annotations)
         if grid_image: all_grid_images.append(grid_image)
-    
     mega_grid_image = None
     if is_permutation_mode and create_mega_grid_toggle and len(all_grid_images) > 1:
         mega_grid_image = create_mega_grid(all_grid_images, page_labels, final_margin_size, show_annotations=show_annotations)
         if mega_grid_image and opts.grid_save:
             filename_part = sanitize_filename(master_prompt_text_unresolved) if use_descriptive_filenames else ""
             images.save_image(mega_grid_image, p.outpath_grids, f"mega-matrix_{filename_part}", prompt=master_prompt_text_unresolved, seed=p.seed, grid=True, p=p)
-    
     if save_prompt_list:
         log_prompts = [];
         for i, item in enumerate(all_prompts_data):
@@ -383,9 +412,9 @@ def add_lora_row(current_count):
 def update_lora_dropdowns():
     lora_names = get_lora_names()
     updates = []
-    for _ in range(MAX_LORA_ROWS):
-        updates.append(gr.Dropdown.update(choices=lora_names))
-    return tuple(updates)
+    for dropdown in lora_dropdowns: # Use the actual list of dropdowns
+        updates.append(gr.Dropdown.update(choices=lora_names, value=[])) # Set value to empty list for multi-select
+    return tuple(updates) # Return as a tuple to unpack correctly
 
 def insert_loras_into_prompt(current_prompt, lora_row_count, *lora_args):
     lora_blocks = []
@@ -403,7 +432,7 @@ def insert_loras_into_prompt(current_prompt, lora_row_count, *lora_args):
 
 # --- Gradio UI Definition ---
 def on_ui_tabs():
-    global lora_rows, lora_row_count # Make these globally accessible for dynamic updates
+    global lora_rows, lora_dropdowns, lora_weights, lora_row_count # Declare globally to make them accessible to callbacks
     
     with gr.Blocks(analytics_enabled=False) as ui_component:
         gr.Markdown("# Ultimate Prompt Matrix")
@@ -434,7 +463,7 @@ def on_ui_tabs():
 
                 with gr.Accordion("LoRA Matrix Builder", open=False):
                     with gr.Row():
-                        gr.Markdown("Click Refresh to load your LoRA models into the dropdowns below.")
+                        gr.Markdown("Click Refresh to load your LoRA models into the dropdowns below. LoRAs must be in the `models/lora` directory.")
                         refresh_loras_btn = gr.Button("🔃 Refresh LoRAs", elem_classes="tool")
                     lora_rows, lora_dropdowns, lora_weights = [], [], []
                     for i in range(MAX_LORA_ROWS):
@@ -513,28 +542,34 @@ def on_ui_tabs():
             html_info = gr.HTML()
             html_log = gr.HTML()
 
+        # --- Define all UI inputs passed to run_matrix_processing ---
+        # NOTE: This order MUST precisely match the function signature!
         ui_inputs_matrix_run = [
             prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
             matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, 
             margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, 
-            show_annotations, enable_dynamic_prompts, generate_anyways_button
+            show_annotations, enable_dynamic_prompts, generate_anyways_button # This button is passed as an input to update itself
         ]
 
+        # --- Define UI inputs for calculate_batch_size_and_time ---
         ui_inputs_calculate_batch = [
             prompt, negative_prompt, matrix_mode, width, height, base_speed_input
         ]
 
+        # --- Define UI inputs for generate_sandbox_image ---
         ui_inputs_sandbox_gen = [
             sandbox_prompt, sandbox_negative_prompt, sandbox_seed,
             sampler_name, scheduler, steps, cfg_scale, width, height
         ]
         
+        # --- Event Handlers ---
         clear_prompt_btn.click(fn=lambda: "", inputs=[], outputs=[prompt])
         clear_neg_prompt_btn.click(fn=lambda: "", inputs=[], outputs=[negative_prompt])
         paste_prompts_btn.click(fn=paste_last_prompts, inputs=[], outputs=[prompt, negative_prompt])
         margin_toggle.change(fn=lambda x: gr.Slider.update(visible=x), inputs=[margin_toggle], outputs=[margin_size])
         matrix_mode.change(fn=lambda mode: gr.Checkbox.update(visible=(mode == "Permutation")), inputs=[matrix_mode], outputs=[create_mega_grid_toggle])
         
+        # LoRA Builder Handlers
         add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
         refresh_loras_btn.click(fn=update_lora_dropdowns, inputs=[], outputs=lora_dropdowns)
         
@@ -543,18 +578,21 @@ def on_ui_tabs():
             lora_py_inputs_for_insertion.extend([lora_dropdowns[i], lora_weights[i]])
         insert_loras_btn.click(fn=insert_loras_into_prompt, inputs=lora_py_inputs_for_insertion, outputs=[prompt])
 
+        # Batch Calculation Handlers
         calculate_btn.click(
             fn=calculate_batch_size_and_time,
             inputs=ui_inputs_calculate_batch,
             outputs=[calculation_results_display, submit, generate_anyways_button]
         )
 
+        # Sandbox Generation Handlers
         generate_sandbox_btn.click(
             fn=generate_sandbox_image,
             inputs=ui_inputs_sandbox_gen,
             outputs=[sandbox_image_display, sandbox_log_display]
         )
 
+        # Main Generation Button Handlers (pass 'submit' and 'generate_anyways_button' to update them)
         submit.click(
             fn=run_matrix_processing, 
             inputs=ui_inputs_matrix_run, 
@@ -568,6 +606,7 @@ def on_ui_tabs():
             show_progress="full"
         )
 
+        # Image Slider Handler
         image_slider.change(
             fn=update_image_display,
             inputs=[image_slider, image_state],

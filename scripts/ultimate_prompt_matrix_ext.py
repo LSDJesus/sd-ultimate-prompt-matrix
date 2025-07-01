@@ -1,8 +1,9 @@
 """
-Ultimate Prompt Matrix Extension v3.1 (Compatibility Release) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.0 (The Final Chapter) for AUTOMATIC1111 & Forge
 
 This is a full-fledged extension that creates its own dedicated tab in the Web UI.
-This version fixes a critical import issue to ensure compatibility with all Web UI versions.
+This version introduces a dynamic, multi-row LoRA matrix builder and implements
+live image previews during generation for a vastly improved user experience.
 """
 
 import math
@@ -15,11 +16,30 @@ from itertools import product
 
 import modules.scripts as scripts
 import gradio as gr
-from modules import images, shared, processing
+from modules import images, shared, processing, sd_samplers, sd_schedulers, sd_models
 from modules.processing import process_images, Processed, StableDiffusionProcessingTxt2Img
 from modules.shared import opts, cmd_opts
 
-# --- Helper Functions (Unchanged) ---
+try:
+    from modules.shared import last_info
+    LAST_INFO_AVAILABLE = True
+except ImportError:
+    last_info = ""
+    LAST_INFO_AVAILABLE = False
+
+# --- Constants and Regex ---
+MAX_LORA_ROWS = 5
+REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
+REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
+
+# --- Helper Functions ---
+def get_lora_names():
+    """Returns a list of all available LoRA model names."""
+    try:
+        return [lora.name for lora in sd_models.loras]
+    except:
+        return ["None"]
+
 def get_font(fontsize):
     try: return ImageFont.truetype("dejavu.ttf", fontsize)
     except IOError:
@@ -27,7 +47,7 @@ def get_font(fontsize):
         except IOError: return ImageFont.load_default()
 
 def draw_grid_with_annotations(grid_images, x_labels, y_labels, margin_size, title="", show_annotations=True):
-    if not grid_images: return None
+    if not grid_images or not any(grid_images): return None
     num_cols = len(x_labels) if x_labels else math.ceil(math.sqrt(len(grid_images)))
     num_rows = math.ceil(len(grid_images) / num_cols)
     if num_rows == 0 or num_cols == 0: return None
@@ -37,7 +57,7 @@ def draw_grid_with_annotations(grid_images, x_labels, y_labels, margin_size, tit
     x_label_height = (label_font.getbbox("Tg")[3] + margin_size * 2) if x_labels and show_annotations else 0
     title_height = (title_font.getbbox("Tg")[3] + margin_size * 2) if title and show_annotations else 0
     grid_w = y_label_width + (num_cols * img_w) + (margin_size * (num_cols - 1))
-    grid_h = title_height + x_label_height + (num_rows * img_h) + (margin_size * (rows - 1))
+    grid_h = title_height + x_label_height + (num_rows * img_h) + (margin_size * (num_rows - 1))
     grid_image = Image.new('RGB', (int(grid_w), int(grid_h)), color='white')
     draw = ImageDraw.Draw(grid_image)
     if title and show_annotations: draw.text((grid_w / 2, margin_size), title, font=title_font, fill='black', anchor="mt")
@@ -64,7 +84,7 @@ def create_mega_grid(all_grids, page_labels, margin_size, show_annotations=True)
     mega_w = mega_cols * grid_w + margin_size * (mega_cols + 1)
     mega_h = mega_rows * (grid_h + title_height) + margin_size * (mega_rows + 1)
     mega_image = Image.new('RGB', (int(mega_w), int(mega_h)), color='#DDDDDD')
-    draw = ImageDraw.Draw(mega_image)
+    draw = ImageDraw.Draw( mega_image)
     for i, grid in enumerate(all_grids):
         col, row = i % mega_cols, i // mega_cols
         cell_x, cell_y = margin_size + col * (grid_w + margin_size), margin_size + row * (grid_h + title_height + margin_size)
@@ -77,43 +97,53 @@ def sanitize_filename(text):
     if not text: return ""
     return re.sub(r'[\\/*?:"<>|]', '', text)[:100]
 
-def get_current_settings():
-    sampler = shared.opts.data.get('sampler_name', 'N/A'); steps = shared.opts.data.get('steps', 'N/A')
-    cfg = shared.opts.data.get('cfg_scale', 'N/A'); width = shared.opts.data.get('width', 'N/A')
-    height = shared.opts.data.get('height', 'N/A'); model_name = shared.sd_model.sd_checkpoint_info.model_name
-    return f"**Model:** {model_name}  \n**Sampler:** {sampler}  \n**Steps:** {steps}  \n**CFG Scale:** {cfg}  \n**Size:** {width}x{height}"
-
 def paste_last_prompts():
-    # THE ROBUST FIX: Check if 'last_info' exists on the 'shared' module before accessing.
-    if hasattr(shared, 'last_info') and shared.last_info:
+    if hasattr(shared, 'last_info') and shared.last_info and shared.last_info != "":
         info_text = shared.last_info
         neg_prompt_match = re.search(r'Negative prompt: (.+?)(?=\nSteps:)', info_text, re.DOTALL)
         neg_prompt = neg_prompt_match.group(1).strip() if neg_prompt_match else ""
         pos_prompt = info_text.split('Negative prompt:')[0].strip()
         return pos_prompt, neg_prompt
-    return "", ""
+    return "Could not find last generation info.", ""
 
+# --- Main Logic Function ---
 def run_matrix_processing(*args):
-    # This function's logic remains the same, as the fixes are in the UI and helper functions
-    (prompt, negative_prompt, matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, show_annotations, enable_dynamic_prompts) = args
-    p = StableDiffusionProcessingTxt2Img(sd_model=shared.sd_model, outpath_samples=opts.outdir_txt2img_samples, outpath_grids=opts.outdir_txt2img_grids)
-    p.prompt = prompt; p.negative_prompt = negative_prompt; p.seed = -1; p.sampler_name = opts.sampler_name
-    p.steps = opts.steps; p.cfg_scale = opts.cfg_scale; p.width = opts.width; p.height = opts.height
-    p.batch_size = 1; p.n_iter = 1
+    # This is now a generator function that yields results
+    (
+        prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
+        matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle,
+        margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames,
+        show_annotations, enable_dynamic_prompts
+    ) = args
+
+    p = StableDiffusionProcessingTxt2Img(
+        sd_model=shared.sd_model, outpath_samples=opts.outdir_txt2img_samples, outpath_grids=opts.outdir_txt2img_grids,
+        prompt=prompt, negative_prompt=negative_prompt, seed=-1, sampler_name=sampler_name, scheduler=scheduler,
+        steps=steps, cfg_scale=cfg_scale, width=width, height=height, batch_size=1, n_iter=1,
+    )
+
     processing.fix_seed(p)
     is_permutation_mode = (matrix_mode == "Permutation")
     prompt_type_lower = prompt_type.lower()
     if prompt_type_lower == "positive" or prompt_type_lower == "both": master_prompt_text_unresolved = p.prompt
     else: master_prompt_text_unresolved = p.negative_prompt
-    master_prompt_text = re.sub(r'<random\(([^)]+)\)>', lambda m: random.choice(m.group(1).split('|')).strip(), master_prompt_text_unresolved)
-    matches = list(re.compile(r'(<(?!lora:)([^>]+)>)').finditer(master_prompt_text))
+    master_prompt_text = re.sub(REX_RANDOM, lambda m: random.choice(m.group(1).split('|')).strip(), master_prompt_text_unresolved)
+    matches = list(REX_MATRIX.finditer(master_prompt_text))
     if not matches:
-        if re.search(r'<random\(([^)]+)\)>', master_prompt_text_unresolved): p.prompt = master_prompt_text; return process_images(p)
-        else: return process_images(p)
+        if re.search(REX_RANDOM, master_prompt_text_unresolved): 
+            p.prompt = master_prompt_text
+            processed = process_images(p)
+            yield { image_state: [processed.images], image_display: processed.images[0], html_info: processed.infotexts[0], html_log: "", image_slider: gr.Slider.update(visible=True, maximum=1, value=1) }
+            return
+        else: 
+            yield { html_log: "No matrix syntax found in prompt." }
+            return
+
     dynamic_prompts_active = False
     if enable_dynamic_prompts:
         try: from sd_dynamic_prompts.prompt_parser import parse; dynamic_prompts_active = True; print("Dynamic Prompts extension found and enabled.")
         except ImportError: print("WARNING: Dynamic Prompts extension not found. __wildcard__ syntax will be ignored.")
+    
     all_prompts_data = []
     if is_permutation_mode:
         x_axis_match = matches.pop() if matches else None; y_axis_match = matches.pop() if matches else None; page_matches = matches
@@ -125,11 +155,12 @@ def run_matrix_processing(*args):
             for y_val in y_options:
                 for x_val in x_options: all_prompts_data.append({'x': x_val, 'y': y_val, 'page': page_values})
     else:
-        base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(r'(<(?!lora:)([^>]+)>)', '', master_prompt_text).split(',')]))
+        base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(REX_MATRIX, '', master_prompt_text).split(',')]))
         optional_tags = [m.group(2).strip() for m in matches]
         for i in range(2**len(optional_tags)):
             selected_tags = [optional_tags[j] for j in range(len(optional_tags)) if (i >> j) & 1]
             all_prompts_data.append(", ".join(filter(None, [base_prompt] + selected_tags)))
+    
     final_prompts_list = []
     for i, item in enumerate(all_prompts_data):
         if is_permutation_mode:
@@ -139,32 +170,56 @@ def run_matrix_processing(*args):
             if x_axis_match: temp_prompt = temp_prompt.replace(x_axis_match.group(1), item['x'], 1)
         else: temp_prompt = item
         final_prompts_list.append(temp_prompt)
+    
     if dry_run:
         print(f"--- DRY RUN: {len(final_prompts_list)} prompts generated. ---"); [print(f"{i+1:03d}: {prompt}") for i, prompt in enumerate(final_prompts_list)]
-        return None, None, "Dry run complete. No images generated.", get_current_settings()
-    final_margin_size = margin_size if margin_toggle else 0; state.job_count = len(final_prompts_list)
-    all_generated_images, all_grid_images, all_infotexts, page_labels = [], [], [], []
-    original_seed = p.seed; original_positive_prompt, original_negative_prompt = p.prompt, p.negative_prompt
+        yield { html_log: "Dry run complete. No images generated." }
+        return
+
+    shared.state.job_count = len(final_prompts_list)
+    final_margin_size = margin_size if margin_toggle else 0
+    all_generated_images, all_infotexts = [], []
+    original_seed = p.seed
+    
     for i, prompt_text in enumerate(final_prompts_list):
-        state.job = f"Image {i+1}/{state.job_count}"; p_copy = copy.copy(p); p_copy.n_iter = 1; p_copy.batch_size = 1
+        if shared.state.interrupted: break
+        shared.state.job = f"Image {i+1}/{shared.state.job_count}"; p_copy = copy.copy(p); p_copy.n_iter = 1; p_copy.batch_size = 1
+        
         if prompt_type_lower == "positive": p_copy.prompt = prompt_text
         elif prompt_type_lower == "negative": p_copy.negative_prompt = prompt_text
         elif prompt_type_lower == "both":
-            p_copy.prompt = prompt_text; temp_neg = original_negative_prompt
+            p_copy.prompt = prompt_text; temp_neg = p.negative_prompt
             if is_permutation_mode:
                 data = all_prompts_data[i]
                 for j, match in enumerate(page_matches): temp_neg = temp_neg.replace(match.group(1), data['page'][j], 1)
                 if y_axis_match: temp_neg = temp_neg.replace(y_axis_match.group(1), data['y'], 1)
                 if x_axis_match: temp_neg = temp_neg.replace(x_axis_match.group(1), data['x'], 1)
             else:
-                base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(r'(<(?!lora:)([^>]+)>)', '', master_prompt_text).split(',')]))
-                added_tags = prompt_text.replace(base_prompt, "").strip(", "); temp_neg = ", ".join(filter(None, [original_negative_prompt, added_tags]))
+                base_prompt = ', '.join(filter(None, [x.strip() for x in re.sub(REX_MATRIX, '', master_prompt_text).split(',')]))
+                added_tags = prompt_text.replace(base_prompt, "").strip(", "); temp_neg = ", ".join(filter(None, [p.negative_prompt, added_tags]))
             p_copy.negative_prompt = temp_neg
+        
         if dynamic_prompts_active: p_copy.prompt = parse(p_copy.prompt)
         p_copy.seed = original_seed + i if different_seeds else original_seed
         processed_single = process_images(p_copy)
+        
         all_generated_images.append(processed_single.images[0])
-        if not all_infotexts: all_infotexts.append(processed_single.infotexts[0])
+        all_infotexts.append(processed_single.infotexts[0])
+        
+        # --- LIVE UPDATE YIELD ---
+        yield { 
+            image_state: all_generated_images, 
+            image_display: processed_single.images[0],
+            html_info: processed_single.infotexts[0],
+            html_log: f"Generated {len(all_generated_images)} of {len(final_prompts_list)} images.",
+            image_slider: gr.Slider.update(visible=True, maximum=len(all_generated_images), value=len(all_generated_images))
+        }
+
+    if shared.state.interrupted: print("Matrix generation interrupted by user.")
+    if not all_generated_images: return
+
+    # --- FINAL GRID ASSEMBLY ---
+    all_grid_images, page_labels = [], []
     if is_permutation_mode:
         for page_idx, page_values in enumerate(page_combinations):
             start_index = page_idx * len(y_options) * len(x_options); end_index = start_index + len(y_options) * len(x_options)
@@ -182,12 +237,14 @@ def run_matrix_processing(*args):
     else:
         grid_image = draw_grid_with_annotations(all_generated_images, [], [], final_margin_size, show_annotations=show_annotations)
         if grid_image: all_grid_images.append(grid_image)
+    
     mega_grid_image = None
     if is_permutation_mode and create_mega_grid_toggle and len(all_grid_images) > 1:
         mega_grid_image = create_mega_grid(all_grid_images, page_labels, final_margin_size, show_annotations=show_annotations)
         if mega_grid_image and opts.grid_save:
             filename_part = sanitize_filename(master_prompt_text_unresolved) if use_descriptive_filenames else ""
             images.save_image(mega_grid_image, p.outpath_grids, f"mega-matrix_{filename_part}", prompt=master_prompt_text_unresolved, seed=p.seed, grid=True, p=p)
+    
     if save_prompt_list:
         log_prompts = []
         for i, item in enumerate(all_prompts_data):
@@ -202,14 +259,30 @@ def run_matrix_processing(*args):
         filename = os.path.join(p.outpath_grids or p.outpath_samples, "prompt_log.txt")
         with open(filename, "w", encoding="utf-8") as f: f.write(prompt_log)
         print(f"Saved prompt list to {filename}")
-    if not all_generated_images: return None, None, "No images were generated.", ""
+
     final_images = []
     if mega_grid_image: final_images.append(mega_grid_image)
     final_images.extend(all_grid_images); final_images.extend(all_generated_images)
-    infotext = all_infotexts[0] if all_infotexts else ""
-    return final_images, infotext, f"Generated {len(final_prompts_list)} images.", get_current_settings()
+    
+    yield { image_state: final_images, image_slider: gr.Slider.update(maximum=len(final_images), value=1), image_display: final_images[0] }
+
+# --- UI Functions ---
+def update_image_display(slider_value, image_list):
+    if image_list and 0 < slider_value <= len(image_list):
+        return image_list[int(slider_value) - 1]
+    return None
+
+def add_lora_row(current_count):
+    current_count += 1
+    updates = {lora_row_count: current_count}
+    for i in range(MAX_LORA_ROWS):
+        updates[lora_rows[i]] = gr.Row.update(visible=(i < current_count))
+    return updates
 
 def on_ui_tabs():
+    global lora_rows, lora_row_count # Make these globally accessible for the helper
+    lora_names = get_lora_names()
+
     with gr.Blocks(analytics_enabled=False) as ui_component:
         gr.Markdown("# Ultimate Prompt Matrix")
         gr.Markdown("A standalone tool for generating complex image grids using permutation, combination, or random syntax.")
@@ -217,23 +290,48 @@ def on_ui_tabs():
             with gr.Column(scale=2, variant="panel"):
                 gr.Markdown("### Prompts")
                 with gr.Row():
-                    prompt = gr.Textbox(label="Prompt", lines=4, placeholder="Enter your prompt with matrix syntax here...")
+                    prompt = gr.Textbox(label="Prompt", lines=3, placeholder="Enter your prompt with matrix syntax here...", elem_id="matrix-prompt")
                     with gr.Column(min_width=40, scale=0):
                         clear_prompt_btn = gr.Button("🗑️", elem_classes=["tool"])
-                        paste_prompts_btn = gr.Button("↙️", elem_classes=["tool"], title="Paste prompts from last generation job")
+                        paste_prompts_btn = gr.Button("↙️", elem_classes=["tool"], tooltip="Paste prompts from last generation job")
                 with gr.Row():
-                    negative_prompt = gr.Textbox(label="Negative Prompt", lines=4, placeholder="Enter negative prompts here...")
+                    negative_prompt = gr.Textbox(label="Negative Prompt", lines=3, placeholder="Enter negative prompts here...", elem_id="matrix-neg-prompt")
                     with gr.Column(min_width=40, scale=0):
                         clear_neg_prompt_btn = gr.Button("🗑️", elem_classes=["tool"])
-                gr.Markdown("### Core Settings")
-                matrix_mode = gr.Radio(["Permutation", "Combination"], label="Matrix Mode", value="Permutation", info="Permutation: <cat|dog>. Combination: <tag1>, <tag2>.")
-                prompt_type = gr.Radio(["Positive", "Negative", "Both"], label="Matrix prompt target", value="Positive")
-                different_seeds = gr.Checkbox(label='Use different seed for each image', value=True)
+                
+                with gr.Accordion("Generation Settings", open=True):
+                    with gr.Row():
+                        sampler_name = gr.Dropdown(label='Sampling method', choices=[s.name for s in sd_samplers.samplers], value='Euler a')
+                        scheduler = gr.Dropdown(label='Schedule type', choices=[s.label for s in sd_schedulers.schedulers], value='Automatic')
+                    with gr.Row():
+                        steps = gr.Slider(label='Sampling steps', minimum=1, maximum=150, value=20, step=1)
+                        cfg_scale = gr.Slider(label='CFG Scale', minimum=1.0, maximum=30.0, value=7.0, step=0.5)
+                    with gr.Row():
+                        width = gr.Slider(label='Width', minimum=64, maximum=2048, value=512, step=64)
+                        height = gr.Slider(label='Height', minimum=64, maximum=2048, value=512, step=64)
+
+                with gr.Accordion("LoRA Matrix Builder", open=False):
+                    lora_rows = []
+                    lora_dropdowns = []
+                    lora_weights = []
+                    for i in range(MAX_LORA_ROWS):
+                        with gr.Row(visible=(i==0), elem_classes="lora-row") as row:
+                            dropdown = gr.Dropdown(lora_names, multiselect=True, label=f"LoRA Block {i+1}")
+                            weight = gr.Slider(minimum=-2.0, maximum=2.0, value=1.0, step=0.05, label="Weight")
+                            lora_rows.append(row)
+                            lora_dropdowns.append(dropdown)
+                            lora_weights.append(weight)
+                    
+                    with gr.Row():
+                        add_lora_btn = gr.Button("[+] Add LoRA Block")
+                        insert_loras_btn = gr.Button("Insert LoRAs into Prompt", variant="primary")
+                        lora_row_count = gr.State(1) # Start with 1 row visible
+
             with gr.Column(scale=1, variant="panel"):
-                with gr.Row():
-                    gr.Markdown("### Current Settings")
-                    refresh_settings_btn = gr.Button("🔃", elem_classes=["tool"], title="Refresh current settings display")
-                settings_display = gr.Markdown("Click Refresh to view settings from the txt2img tab.")
+                gr.Markdown("### Matrix Core Settings")
+                matrix_mode = gr.Radio(["Permutation", "Combination"], label="Matrix Mode", value="Permutation")
+                prompt_type = gr.Radio(["Positive", "Negative", "Both"], label="Matrix prompt target", value="Positive")
+                different_seeds = gr.Checkbox(label='Use different seed for each image', value=False)
                 gr.Markdown("### Output & Grid Control")
                 show_annotations = gr.Checkbox(label="Show grid labels & titles", value=True)
                 margin_toggle = gr.Checkbox(label="Enable Grid Margins", value=True)
@@ -241,23 +339,92 @@ def on_ui_tabs():
                 create_mega_grid_toggle = gr.Checkbox(label="Create a 'Mega-Grid' (Permutation mode)", value=True, visible=True)
                 use_descriptive_filenames = gr.Checkbox(label="Use descriptive filenames for grids", value=False)
                 save_prompt_list = gr.Checkbox(label="Save prompt list to a text file", value=False)
-        with gr.Accordion("Optional & Advanced Features", open=False):
+
+        with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts)", value=False)
             with gr.Blocks():
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
+        
         submit = gr.Button("Generate", variant="primary")
-        with gr.Row(): gallery = gr.Gallery(label="Generated images", show_label=False, elem_id="matrix_gallery", columns=4, height="auto")
+
+        with gr.Blocks():
+            image_display = gr.Image(label="Output Image", show_label=False, type="pil", interactive=False)
+            image_slider = gr.Slider(label="Image", minimum=1, step=1, interactive=True, visible=False)
+            image_state = gr.State([])
         with gr.Row():
             html_info = gr.HTML()
             html_log = gr.HTML()
-        ui_inputs = [prompt, negative_prompt, matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, show_annotations, enable_dynamic_prompts]
+
+        # --- Define Javascript for LoRA insertion ---
+        # This is a complex but necessary part for a good user experience
+        insert_loras_js = """
+        function(...args) {
+            let current_prompt = args[0];
+            let lora_blocks = [];
+            // Loop through the max number of rows to check which are visible
+            for (let i = 0; i < 5; i++) {
+                // The visibility of the row is controlled by Gradio, we check its style
+                const row_element = document.querySelector(`#ultimate_matrix > div > div > div > div:nth-child(2) > div > div > div > div > div.lora-row:nth-of-type(${i+1})`);
+                if (row_element && row_element.style.display !== 'none') {
+                    let selected_loras = args[i*2 + 1]; // Each row has 2 args: dropdown + slider
+                    let weight = args[i*2 + 2];
+                    if (selected_loras && selected_loras.length > 0) {
+                        let block_parts = selected_loras.map(lora => `<lora:${lora}:${weight}>`);
+                        lora_blocks.push(block_parts.join('|'));
+                    }
+                }
+            }
+            if (lora_blocks.length > 0) {
+                let matrix_string = `<${lora_blocks.join('>,<')}>`;
+                // Add a comma if the prompt doesn't already have one at the end
+                let new_prompt = current_prompt.trim().endsWith(',') ? current_prompt.trim() + ' ' : current_prompt.trim() + ', ';
+                new_prompt += matrix_string;
+                // Find the prompt textarea and update it
+                const prompt_textarea = document.querySelector("#matrix-prompt textarea");
+                prompt_textarea.value = new_prompt;
+                // This is a Gradio internal function to notify the backend of the change
+                updateInput(prompt_textarea); 
+                return new_prompt;
+            }
+            return current_prompt; // Return original prompt if no loras selected
+        }
+        """
+
+        # --- Event Handlers ---
+        add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
+        
+        lora_js_inputs = [prompt]
+        for i in range(MAX_LORA_ROWS):
+            lora_js_inputs.extend([lora_dropdowns[i], lora_weights[i]])
+        insert_loras_btn.click(None, lora_js_inputs, None, _js=insert_loras_js)
+
+        ui_inputs = [
+            prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,
+            matrix_mode, prompt_type, different_seeds, margin_size, create_mega_grid_toggle, 
+            margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames, 
+            show_annotations, enable_dynamic_prompts
+        ]
+        
         clear_prompt_btn.click(fn=lambda: "", inputs=[], outputs=[prompt])
         clear_neg_prompt_btn.click(fn=lambda: "", inputs=[], outputs=[negative_prompt])
-        refresh_settings_btn.click(fn=get_current_settings, inputs=[], outputs=[settings_display])
         paste_prompts_btn.click(fn=paste_last_prompts, inputs=[], outputs=[prompt, negative_prompt])
         margin_toggle.change(fn=lambda x: gr.Slider.update(visible=x), inputs=[margin_toggle], outputs=[margin_size])
         matrix_mode.change(fn=lambda mode: gr.Checkbox.update(visible=(mode == "Permutation")), inputs=[matrix_mode], outputs=[create_mega_grid_toggle])
-        submit.click(fn=run_matrix_processing, inputs=ui_inputs, outputs=[gallery, html_info, html_log, settings_display])
+        
+        submit.click(
+            fn=run_matrix_processing, 
+            inputs=ui_inputs, 
+            outputs=[image_state, image_display, html_info, html_log, image_slider],
+            # This makes the function a generator that can be interrupted
+            show_progress="full" 
+        )
+        image_slider.change(
+            fn=update_image_display,
+            inputs=[image_slider, image_state],
+            outputs=[image_display]
+        )
+    
     return [(ui_component, "Ultimate Matrix", "ultimate_matrix")]
+
 scripts.script_callbacks.on_ui_tabs(on_ui_tabs)

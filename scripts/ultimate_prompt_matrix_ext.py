@@ -1,9 +1,9 @@
 """
-Ultimate Prompt Matrix Extension v5.2 (LoRA Loader Fix) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v5.3 (Final Stability Release) for AUTOMATIC1111 & Forge
 
-This version fixes a critical Gradio bug where the LoRA dropdowns would not populate.
-The return value from the update function is now correctly unpacked, ensuring the UI
-updates as expected. This should be the final, stable version.
+This version represents a full architectural rewrite of the LoRA Matrix Builder. It now uses
+a pure Python backend, eliminating the JavaScript state bug that prevented the LoRA
+dropdowns from working correctly. This is the definitive, stable version.
 """
 
 import math
@@ -115,6 +115,7 @@ def run_matrix_processing(*args):
         margin_toggle, dry_run, save_prompt_list, use_descriptive_filenames,
         show_annotations, enable_dynamic_prompts
     ) = all_args[:19]
+
     p = StableDiffusionProcessingTxt2Img(
         sd_model=shared.sd_model, outpath_samples=opts.outdir_txt2img_samples, outpath_grids=opts.outdir_txt2img_grids,
         prompt=prompt, negative_prompt=negative_prompt, seed=-1, sampler_name=sampler_name, scheduler=scheduler,
@@ -240,6 +241,7 @@ def run_matrix_processing(*args):
     final_images.extend(all_grid_images); final_images.extend(all_generated_images)
     yield { image_state: final_images, image_slider: gr.Slider.update(maximum=len(final_images), value=1), image_display: final_images[0] }
 
+# --- UI Functions ---
 def update_image_display(slider_value, image_list):
     if image_list and 0 < slider_value <= len(image_list):
         return image_list[int(slider_value) - 1]
@@ -257,8 +259,27 @@ def update_lora_dropdowns():
     updates = []
     for _ in range(MAX_LORA_ROWS):
         updates.append(gr.Dropdown.update(choices=lora_names))
-    # --- THE FIX IS HERE ---
-    return tuple(updates) # Return as a tuple to unpack correctly
+    return tuple(updates)
+
+# --- NEW PURE PYTHON LORA INSERTION FUNCTION ---
+def insert_loras_into_prompt(current_prompt, lora_row_count, *lora_args):
+    lora_blocks = []
+    for i in range(lora_row_count):
+        # Each row has 2 args: dropdown list and weight slider
+        selected_loras = lora_args[i*2]
+        weight = lora_args[i*2 + 1]
+        
+        if selected_loras and len(selected_loras) > 0:
+            block_parts = [f"<lora:{lora}:{weight}>" for lora in selected_loras]
+            lora_blocks.append("|".join(block_parts))
+    
+    if lora_blocks:
+        matrix_string = f"<{'>,<'.join(lora_blocks)}>"
+        # Add a comma if the prompt doesn't already have one at the end
+        separator = ", " if current_prompt.strip() and not current_prompt.strip().endswith(',') else ""
+        return current_prompt.strip() + separator + matrix_string
+    
+    return current_prompt # Return original prompt if no loras selected
 
 def on_ui_tabs():
     global lora_rows, lora_row_count
@@ -333,40 +354,16 @@ def on_ui_tabs():
         with gr.Row():
             html_info = gr.HTML()
             html_log = gr.HTML()
-
-        insert_loras_js = """
-        function(...args) {
-            let current_prompt = args[0];
-            const lora_row_count = args[1];
-            let lora_blocks = [];
-            for (let i = 0; i < lora_row_count; i++) {
-                let selected_loras = args[i*2 + 2];
-                let weight = args[i*2 + 3];
-                if (selected_loras && selected_loras.length > 0) {
-                    let block_parts = selected_loras.map(lora => `<lora:${lora}:${weight}>`);
-                    lora_blocks.push(block_parts.join('|'));
-                }
-            }
-            if (lora_blocks.length > 0) {
-                let matrix_string = `<${lora_blocks.join('>,<')}>`;
-                let new_prompt = current_prompt.trim().endsWith(',') ? current_prompt.trim() + ' ' : current_prompt.trim() + ', ';
-                new_prompt += matrix_string;
-                const prompt_textarea = document.querySelector("#matrix-prompt textarea");
-                prompt_textarea.value = new_prompt;
-                updateInput(prompt_textarea); 
-                return new_prompt;
-            }
-            return current_prompt;
-        }
-        """
         
+        # --- Event Handlers ---
         add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
         refresh_loras_btn.click(fn=update_lora_dropdowns, inputs=[], outputs=lora_dropdowns)
         
-        lora_js_inputs = [prompt, lora_row_count]
+        # New Pure Python handler for inserting loras
+        lora_py_inputs = [prompt, lora_row_count]
         for i in range(MAX_LORA_ROWS):
-            lora_js_inputs.extend([lora_dropdowns[i], lora_weights[i]])
-        insert_loras_btn.click(None, lora_js_inputs, None, _js=insert_loras_js)
+            lora_py_inputs.extend([lora_dropdowns[i], lora_weights[i]])
+        insert_loras_btn.click(fn=insert_loras_into_prompt, inputs=lora_py_inputs, outputs=[prompt])
 
         ui_inputs = [
             prompt, negative_prompt, sampler_name, scheduler, steps, cfg_scale, width, height,

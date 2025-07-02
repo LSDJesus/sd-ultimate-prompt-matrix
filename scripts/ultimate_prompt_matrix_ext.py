@@ -1,9 +1,9 @@
 """
-Ultimate Prompt Matrix Extension v6.3 (Ultimate Stability Release) for AUTOMATIC1111 & Forge
+Ultimate Prompt Matrix Extension v6.4 (Ultimate Component Ordering Release) for AUTOMATIC1111 & Forge
 
-This version completely re-architects the UI definition to conform strictly to Gradio's component
-registration lifecycle. It resolves all known UI loading, persistence, and dropdown warning issues,
-making the extension exceptionally stable and reliable.
+This version completely re-architects the UI definition to strictly adhere to Gradio's component
+registration lifecycle. It defines ALL UI components first, then registers all event handlers,
+resolving all known NameError and AttributeError issues.
 """
 
 import math
@@ -33,7 +33,7 @@ MAX_LORA_ROWS = 5
 REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
 REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
 
-# --- Global Helper Functions (Accessible to all parts of the script) ---
+# --- Helper Functions (Global functions accessed by inner functions) ---
 def get_font(fontsize):
     try: return ImageFont.truetype("dejavu.ttf", fontsize)
     except IOError:
@@ -103,8 +103,8 @@ def paste_last_prompts():
     if hasattr(shared, 'last_info') and shared.last_info and shared.last_info != "":
         info_text = shared.last_info
         neg_prompt_match = re.search(r'Negative prompt: (.+?)(?=\nSteps:)', info_text, re.DOTALL)
-        neg_prompt = neg_prompt_match.group(1).strip() if neg_prompt_match else ""
         pos_prompt = info_text.split('Negative prompt:')[0].strip()
+        neg_prompt = neg_prompt_match.group(1).strip() if neg_prompt_match else ""
         return pos_prompt, neg_prompt
     return "Could not find last generation info.", ""
 
@@ -288,7 +288,6 @@ def run_matrix_processing(*args):
     else:
         grid_image = draw_grid_with_annotations(all_generated_images, [], [], final_margin_size, show_annotations=show_annotations)
         if grid_image: all_grid_images.append(grid_image)
-    
     mega_grid_image = None
     if is_permutation_mode and create_mega_grid_toggle and len(all_grid_images) > 1:
         mega_grid_image = create_mega_grid(all_grid_images, page_labels, final_margin_size, show_annotations=show_annotations)
@@ -398,7 +397,8 @@ def on_ui_tabs():
                         # --- Sampler Name Setup ---
                         sampler_choices = [s.name for s in sd_samplers.samplers]
                         default_sampler_value = opts.data.get('sd_sampler_name', opts.data.get('sampler_name', 'Euler a'))
-                        if default_sampler_value not in sampler_choices and sampler_choices: # Check if value is valid in choices
+                        # Robust check for default sampler
+                        if default_sampler_value not in sampler_choices and sampler_choices:
                             default_sampler_value = sampler_choices[0]
                         elif not sampler_choices:
                             default_sampler_value = None
@@ -407,7 +407,8 @@ def on_ui_tabs():
                         # --- Scheduler Setup ---
                         scheduler_choices = [s.label for s in sd_schedulers.schedulers]
                         default_scheduler_value = opts.data.get('sd_scheduler', opts.data.get('scheduler_name', 'Automatic'))
-                        if default_scheduler_value not in scheduler_choices and scheduler_choices: # Check if value is valid in choices
+                        # Robust check for default scheduler
+                        if default_scheduler_value not in scheduler_choices and scheduler_choices:
                             default_scheduler_value = scheduler_choices[0] 
                         elif not scheduler_choices:
                             default_scheduler_value = None
@@ -485,12 +486,12 @@ def on_ui_tabs():
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
             # ultimate_matrix_large_batch_threshold is defined at the top of the Blocks context
-            with gr.Blocks(): # This inner Blocks seems redundant but is preserved as per previous structure
+            with gr.Blocks(): 
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
         
         # Main Generate Buttons (Controlled by calculation)
-        submit_button_main = gr.Button("Generate", variant="primary", interactive=False)
+        submit = gr.Button("Generate", variant="primary", interactive=False)
         generate_anyways_button = gr.Button("Generate Anyways", variant="stop", interactive=False)
 
         with gr.Blocks():
@@ -543,7 +544,7 @@ def on_ui_tabs():
         refresh_loras_btn.click(
             fn=update_lora_dropdowns_inner, 
             inputs=[], 
-            outputs=lora_dropdowns_list # This list of outputs will now be correctly mapped due to explicit definition
+            outputs=lora_dropdowns_list 
         )
         lora_py_inputs_for_insertion = [prompt, lora_row_count]
         for i in range(MAX_LORA_ROWS):

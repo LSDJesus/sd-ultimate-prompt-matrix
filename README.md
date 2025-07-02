@@ -1,44 +1,56 @@
 # Ultimate Prompt Matrix Extension for AUTOMATIC1111 & Forge
 
-An advanced prompt matrix extension for AUTOMATIC1111's Web UI and its popular forks. This extension creates its own dedicated tab, providing a powerful and uncluttered interface for generating complex image grids.
+An advanced prompt matrix and parameter testing suite for AUTOMATIC1111, Forge, and other popular forks. This extension provides a powerful, dedicated UI tab for generating complex image grids and discovering the perfect settings for your concepts.
 
 ![UI Mockup](uimockup.png)
 
-## Compatibility
-This script is fully compatible with:
-- **AUTOMATIC1111's Stable Diffusion Web UI** (recent versions)
-- **SD.Next** (formerly Vladmandic's fork)
-- **Forge** (the high-performance fork by lllyasviel)
-- ...and likely any other fork that maintains the standard extension/script API.
+## Key Features
 
-## Features
+### 1. Full Parameter Matrixing
+The flagship feature of this extension. Go beyond prompt variations and create grids that test different generation parameters against each other. Find the best settings for your subject with unparalleled precision.
 
-### Core Functionality
-- **Permutation Mode:** Generates all possible substitutions from a prompt (e.g., `a <cat|dog>`). Perfect for comparing variations.
-- **Combination Mode:** Generates all possible subsets of optional tags (e.g., `base, <tag1>, <tag2>`). Perfect for testing keyword influence.
-- **Always-on Random Syntax:** Use `<random(a|b|c)>` to have one item picked at random from the list for added variety.
+- **Syntax:** `A cat <cfg(5|7.5|10)> <steps(20|30)>`
+- **Supported Parameters:**
+    - `cfg(...)` - CFG Scale
+    - `steps(...)` - Sampling Steps
+    - `sampler(...)` - The Sampler (e.g., `DPM++ 2M Karras`)
+    - `scheduler(...)` - The Scheduler (e.g., `Karras`)
+    - `checkpoint(...)` - The Checkpoint/Model file (e.g., `my_model.safetensors`)
+- **Combine Everything:** Mix prompt and parameter matrices freely: `A <cat|dog> in a hat <cfg(7|9)>`
 
-### Workflow & UI Enhancements
-- **Dedicated UI Tab:** A clean, professional, and spacious interface that will never be cut off or squished.
-- **Quality-of-Life Buttons:**
-    - `↙️` **Paste Last Prompts:** Instantly populate the prompt fields with the prompts from your last generation job.
-    - `🗑️` **Clear Prompts:** Quickly clear the positive or negative prompt boxes with a single click.
-    - `🔃` **Refresh Settings:** Instantly see which Sampler, Steps, CFG, Model, etc., are currently active from the main txt2img tab.
-- **Dry Run Mode:** Validate your prompt logic and see all generated prompts *before* using GPU time.
+### 2. Intelligent & Powerful Grid Generation
+- **Automatic Prompt Detection:** The script automatically detects matrix syntax in **both positive and negative prompts**. There's no need to tell it what to do—it just works. If you have matrices in both prompts, it will generate the full combinatorial product.
+- **Axis Control & Visualizer:** Before you generate, click **"Pre-process & Calculate"** to see a preview of your grid axes. Use the "Swap" and "Cycle" buttons to rearrange the X, Y, and Page axes to get the exact grid layout you want without re-typing your prompt.
+- **Advanced Seed Control:** A "Seed Behavior" dropdown gives you fine-grained control:
+    - `Iterate Per Image`: Standard `seed, seed+1, ...` behavior.
+    - `Iterate Per Row`: **(Highly Useful!)** All images in a row share the same seed. Perfect for keeping a character consistent while changing one variable (like clothing or background) on the X-axis.
+    - `Fixed`: Every image uses the exact same seed.
+    - `Random`: Every image gets a completely random seed.
 
-### Grid & Output Control
-- **Fully Annotated Grids:** Creates grids with clear X, Y, and Page axis labels with large, readable fonts.
-- **Toggleable Annotations:** A checkbox to show or hide all text labels and titles on the final grids for a clean, aesthetic look.
-- **Mega-Grid Summary:** Optionally combines all page grids into a single high-resolution overview image.
-- **File Management:** Options to save a log of all generated prompts and use descriptive filenames for grids.
+### 3. Workflow & Safety Features
+- **Preset System:** Save your entire setup—prompts, settings, sliders, and all—to a named preset. Load it back with a single click to re-run complex tests anytime.
+- **Batch Pre-Calculator:** See exactly how many images will be generated and get an **estimated total runtime** *before* you start.
+- **Large Batch Warning:** The main "Generate" button is disabled for very large jobs, preventing accidental resource lock-up. An override button lets you proceed with caution.
+- **Dry Run Mode:** Validate your logic by printing a full list of all jobs (prompts, parameters, and seeds) to the console without using any GPU time.
 
-### Advanced Integration
-- **Dynamic Prompts:** Optional integration to process `__wildcard__` syntax if the sd-dynamic-prompts extension is installed.
-- **LoRA-Safe Syntax:** The `<...>` parser is designed to ignore `<lora:...>` syntax automatically.
+### 4. UI & Quality of Life
+- **Dedicated UI Tab:** A clean, professional, and spacious interface.
+- **Tabbed Output:** Results are organized into a "Summary Grids" tab and an "All Images" tab for easy review.
+- **LoRA Matrix Builder:** A visual interface to build complex LoRA matrices (`<lora:A:1|lora:B:1>`) and insert them into your prompt.
+- **Help & Syntax Guide:** A built-in accordion explains all the syntax and features.
 
+## Syntax Quick Reference
+
+- **Prompt Matrix:** `a photo of a <cat|dog|bird>`
+- **Parameter Matrix:** `a photo of a cat <cfg(5|7.5|10)>`
+- **Random Word:** `a photo of a <random(cat|dog|bird)>`
+
+The script reads matrix tags from your prompts from **end to beginning**:
+- The **last** tag becomes the **X-axis**.
+- The **second-to-last** tag becomes the **Y-axis**.
+- **All other tags** become **Page-axes**.
 
 ## Installation
-Installation is simple via the Web UI's "Install from URL" feature:
 1.  In your Web UI, go to the **Extensions** tab.
 2.  Click on the **Install from URL** sub-tab.
 3.  Paste the following URL into the "URL for extension's git repository" field:
@@ -46,8 +58,7 @@ Installation is simple via the Web UI's "Install from URL" feature:
     https://github.com/LSDJesus/sd-ultimate-prompt-matrix
     ```
 4.  Click the **"Install"** button.
-5.  Wait for the confirmation message, then go to the **Installed** tab.
-6.  Click **"Apply and restart UI"**.
+5.  Wait for the confirmation message, then go to the **Installed** tab and click **"Apply and restart UI"**.
 
 A new tab named **"Ultimate Matrix"** will now appear at the top of your Web UI.
 

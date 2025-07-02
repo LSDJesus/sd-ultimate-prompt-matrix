@@ -33,12 +33,20 @@ MAX_LORA_ROWS = 5
 REX_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
 REX_RANDOM = re.compile(r'<random\(([^)]+)\)>')
 
-# --- Helper Functions (Global functions accessed by inner functions) ---
+# --- Global Helper Functions (Accessible to all parts of the script) ---
 def get_font(fontsize):
     try: return ImageFont.truetype("dejavu.ttf", fontsize)
     except IOError:
         try: return ImageFont.truetype("arial.ttf", fontsize)
         except IOError: return ImageFont.load_default()
+
+def get_lora_names():
+    try:
+        sd_models.refresh_loras()
+        return [lora.name for lora in sd_models.loras]
+    except Exception as e:
+        print(f"[Ultimate Matrix] Error getting LoRA names: {e}")
+        return ["None"]
 
 def draw_grid_with_annotations(grid_images, x_labels, y_labels, margin_size, title="", show_annotations=True):
     if not grid_images or not any(grid_images): return None
@@ -320,38 +328,8 @@ def run_matrix_processing(*args):
     }
 
 # --- UI Functions (Callbacks) ---
-def update_image_display(slider_value, image_list):
-    if image_list and 0 < slider_value <= len(image_list):
-        return image_list[int(slider_value) - 1]
-    return None
-
-def add_lora_row(current_count):
-    current_count += 1
-    updates = {lora_row_count: current_count}
-    for i in range(MAX_LORA_ROWS):
-        updates[lora_rows[i]] = gr.Row.update(visible=(i < current_count))
-    return updates
-
-def update_lora_dropdowns():
-    lora_names = get_lora_names()
-    updates = []
-    for _ in range(MAX_LORA_ROWS):
-        updates.append(gr.Dropdown.update(choices=lora_names))
-    return tuple(updates)
-
-def insert_loras_into_prompt(current_prompt, lora_row_count, *lora_args):
-    lora_blocks = []
-    for i in range(lora_row_count):
-        selected_loras = lora_args[i*2]
-        weight = lora_args[i*2 + 1]
-        if selected_loras and len(selected_loras) > 0:
-            block_parts = [f"<lora:{lora}:{weight}>" for lora in selected_loras]
-            lora_blocks.append("|".join(block_parts))
-    if lora_blocks:
-        matrix_string = f"<{'>,<'.join(lora_blocks)}>"
-        separator = ", " if current_prompt.strip() and not current_prompt.strip().endswith(',') else ""
-        return current_prompt.strip() + separator + matrix_string
-    return current_prompt # Return original prompt if no loras selected
+# These functions are defined inside on_ui_tabs for correct Gradio binding/scoping
+# update_image_display is already defined globally as it's a simple helper
 
 # --- Gradio UI Definition ---
 def on_ui_tabs():
@@ -359,30 +337,47 @@ def on_ui_tabs():
     # This ensures components are accessible for updates from other functions/events
     global lora_rows, lora_row_count, submit_button_main, generate_anyways_button, ultimate_matrix_large_batch_threshold
     
+    # --- Helper Callbacks (Defined within on_ui_tabs for scope/closure) ---
+    # These functions directly manipulate UI components defined below, so they must be able to 'see' them.
+    def add_lora_row_inner(current_count):
+        current_count += 1
+        updates = {lora_row_count: current_count}
+        for i in range(MAX_LORA_ROWS):
+            updates[lora_rows[i]] = gr.Row.update(visible=(i < current_count))
+        return updates
+
+    def update_lora_dropdowns_inner():
+        lora_names = get_lora_names() # Calls the global helper
+        updates = []
+        for _ in range(MAX_LORA_ROWS):
+            updates.append(gr.Dropdown.update(choices=lora_names))
+        return tuple(updates)
+
+    def insert_loras_into_prompt_inner(current_prompt, lora_row_count_val, *lora_args):
+        lora_blocks = []
+        for i in range(lora_row_count_val):
+            selected_loras = lora_args[i*2]
+            weight = lora_args[i*2 + 1]
+            if selected_loras and len(selected_loras) > 0:
+                block_parts = [f"<lora:{lora}:{weight}>" for lora in selected_loras]
+                lora_blocks.append("|".join(block_parts))
+        if lora_blocks:
+            matrix_string = f"<{'>,<'.join(lora_blocks)}>"
+            separator = ", " if current_prompt.strip() and not current_prompt.strip().endswith(',') else ""
+            return current_prompt.strip() + separator + matrix_string
+        return current_prompt # Return original prompt if no loras selected
+
     with gr.Blocks(analytics_enabled=False) as ui_component:
-        # --- Define persisted components and their load/change handlers FIRST ---
-        # This is the key. Define components that need 'load' interaction first.
+        # --- Define ALL UI components first, before binding events ---
+        # This is crucial for Gradio's internal registration.
+        
+        # Persisted Component
         ultimate_matrix_large_batch_threshold = gr.Number(
             label="Large Batch Threshold (images)",
             value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100),
             precision=0
         )
         
-        # --- Root ui_component.load handler for persistence ---
-        ui_component.load(
-            fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
-            inputs=[],
-            outputs=[ultimate_matrix_large_batch_threshold], 
-            show_progress=False
-        )
-        # Change handler for persistence
-        ultimate_matrix_large_batch_threshold.change(
-            fn=lambda x: setattr(shared.opts, 'ultimate_matrix_large_batch_threshold', x),
-            inputs=[ultimate_matrix_large_batch_threshold],
-            outputs=[],
-            show_progress=False
-        )
-
         gr.Markdown("# Ultimate Prompt Matrix")
         gr.Markdown("A standalone tool for generating complex image grids using permutation, combination, or random syntax.")
         with gr.Row(equal_height=False):
@@ -403,21 +398,19 @@ def on_ui_tabs():
                         # --- Sampler Name Setup ---
                         sampler_choices = [s.name for s in sd_samplers.samplers]
                         default_sampler_value = opts.data.get('sd_sampler_name', opts.data.get('sampler_name', 'Euler a'))
-                        # Robust check for default sampler
-                        if default_sampler_value not in sampler_choices and sampler_choices:
-                            default_sampler_value = sampler_choices[0] # Fallback to first available if default not present
+                        if default_sampler_value not in sampler_choices and sampler_choices: # Check if value is valid in choices
+                            default_sampler_value = sampler_choices[0]
                         elif not sampler_choices:
-                            default_sampler_value = None # If no samplers are loaded at all
+                            default_sampler_value = None
                         sampler_name = gr.Dropdown(label='Sampling method', choices=sampler_choices, value=default_sampler_value)
                         
                         # --- Scheduler Setup ---
                         scheduler_choices = [s.label for s in sd_schedulers.schedulers]
                         default_scheduler_value = opts.data.get('sd_scheduler', opts.data.get('scheduler_name', 'Automatic'))
-                        # Robust check for default scheduler
-                        if default_scheduler_value not in scheduler_choices and scheduler_choices:
-                            default_scheduler_value = scheduler_choices[0] # Fallback to first available if default not present
+                        if default_scheduler_value not in scheduler_choices and scheduler_choices: # Check if value is valid in choices
+                            default_scheduler_value = scheduler_choices[0] 
                         elif not scheduler_choices:
-                            default_scheduler_value = None # If no schedulers are loaded at all
+                            default_scheduler_value = None
                             
                         scheduler = gr.Dropdown(label='Schedule type', choices=scheduler_choices, value=default_scheduler_value)
                     with gr.Row():
@@ -431,16 +424,18 @@ def on_ui_tabs():
                     with gr.Row():
                         gr.Markdown("Click Refresh to load your LoRA models into the dropdowns below.")
                         refresh_loras_btn = gr.Button("🔃 Refresh LoRAs", elem_classes="tool")
-                    lora_rows, lora_dropdowns, lora_weights = [], [], []
+                    lora_rows_list = [] # Use a local list name to avoid global variable confusion
+                    lora_dropdowns_list = []
+                    lora_weights_list = []
                     for i in range(MAX_LORA_ROWS):
                         with gr.Row(visible=(i==0), elem_classes="lora-row") as row:
                             dropdown = gr.Dropdown([], multiselect=True, label=f"LoRA Block {i+1}")
                             weight = gr.Slider(minimum=-2.0, maximum=2.0, value=1.0, step=0.05, label="Weight")
-                            lora_rows.append(row); lora_dropdowns.append(dropdown); lora_weights.append(weight)
+                            lora_rows_list.append(row); lora_dropdowns_list.append(dropdown); lora_weights_list.append(weight)
                     with gr.Row():
                         add_lora_btn = gr.Button(f"[+] Add LoRA Block (Max: {MAX_LORA_ROWS})")
                         insert_loras_btn = gr.Button("Insert LoRAs into Prompt", variant="primary")
-                        lora_row_count = gr.State(1)
+                        lora_row_count = gr.State(1) # This is a gr.State, not a global Python variable
 
             with gr.Column(scale=1, variant="panel"):
                 gr.Markdown("### Matrix Core Settings")
@@ -490,12 +485,12 @@ def on_ui_tabs():
         with gr.Accordion("Advanced Features", open=False):
             dry_run = gr.Checkbox(label="Dry Run (don't generate images, just print prompts to terminal)", value=False)
             # ultimate_matrix_large_batch_threshold is defined at the top of the Blocks context
-            with gr.Blocks(): 
+            with gr.Blocks(): # This inner Blocks seems redundant but is preserved as per previous structure
                 enable_dynamic_prompts = gr.Checkbox(label="Process Dynamic Prompts (__wildcards__)", value=False)
                 gr.Markdown("[Click here for Dynamic Prompts installation instructions.](https://github.com/adieyal/sd-dynamic-prompts)")
         
         # Main Generate Buttons (Controlled by calculation)
-        submit = gr.Button("Generate", variant="primary", interactive=False)
+        submit_button_main = gr.Button("Generate", variant="primary", interactive=False)
         generate_anyways_button = gr.Button("Generate Anyways", variant="stop", interactive=False)
 
         with gr.Blocks():
@@ -509,7 +504,20 @@ def on_ui_tabs():
         # --- ALL EVENT HANDLERS DEFINED AFTER ALL COMPONENTS ARE DEFINED ---
         # This is the crucial part for Gradio's internal registration
 
-        # Persistence handlers (already defined and linked at top of Blocks context)
+        # Persistence handlers
+        # ui_component.load handler for persistence
+        ui_component.load(
+            fn=lambda: gr.Number.update(value=shared.opts.data.get('ultimate_matrix_large_batch_threshold', 100)),
+            inputs=[],
+            outputs=[ultimate_matrix_large_batch_threshold], 
+            show_progress=False
+        )
+        ultimate_matrix_large_batch_threshold.change(
+            fn=lambda x: setattr(shared.opts, 'ultimate_matrix_large_batch_threshold', x),
+            inputs=[ultimate_matrix_large_batch_threshold],
+            outputs=[],
+            show_progress=False
+        )
 
         # Standard UI Input List for run_matrix_processing
         ui_inputs_matrix_run = [
@@ -531,16 +539,16 @@ def on_ui_tabs():
         margin_toggle.change(fn=lambda x: gr.Slider.update(visible=x), inputs=[margin_toggle], outputs=[margin_size])
         matrix_mode.change(fn=lambda mode: gr.Checkbox.update(visible=(mode == "Permutation")), inputs=[matrix_mode], outputs=[create_mega_grid_toggle])
         
-        add_lora_btn.click(add_lora_row, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows)
+        add_lora_btn.click(add_lora_row_inner, inputs=[lora_row_count], outputs=[lora_row_count] + lora_rows_list)
         refresh_loras_btn.click(
-            fn=update_lora_dropdowns, 
+            fn=update_lora_dropdowns_inner, 
             inputs=[], 
-            outputs=lora_dropdowns 
+            outputs=lora_dropdowns_list # This list of outputs will now be correctly mapped due to explicit definition
         )
         lora_py_inputs_for_insertion = [prompt, lora_row_count]
         for i in range(MAX_LORA_ROWS):
-            lora_py_inputs_for_insertion.extend([lora_dropdowns[i], lora_weights[i]])
-        insert_loras_btn.click(fn=insert_loras_into_prompt, inputs=lora_py_inputs_for_insertion, outputs=[prompt])
+            lora_py_inputs_for_insertion.extend([lora_dropdowns_list[i], lora_weights_list[i]])
+        insert_loras_btn.click(fn=insert_loras_into_prompt_inner, inputs=lora_py_inputs_for_insertion, outputs=[prompt])
 
         calculate_btn.click(
             fn=calculate_batch_size_and_time,

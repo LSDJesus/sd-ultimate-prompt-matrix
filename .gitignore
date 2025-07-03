@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+scripts/code_v7.3.4_sleep_backup.py
+Synopsis for Tomorrow's Session.txt
+testprompt.txt

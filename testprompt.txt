@@ -1,3 +1,0 @@
-a cinematic portrait of a <cat|dog>, <sampler(Euler a|DPM++ 2M Karras)>, <cfg(6|9)>, wearing a <random(coat|funny hat|pair of boots)>
-
-nsfw, nude, naked, (worst quality, low quality, normal quality:1.4), ugly, deformed, blurry, sexual, explicit, erotic, violence, gore, blood

@@ -2,19 +2,12 @@ import re
 import random
 from itertools import product
 
-# New regex to find reference tags like |matrix:animal|, |Δ(cfg)|, |Loras:style1|
-# It captures the type ('matrix', 'Δ', 'Loras', 'random', etc.) and the label ('animal', 'cfg', 'style1')
 REX_REFTAG = re.compile(r'\|(matrix|random|Δ)\:([^|]+)\|')
-
-# Keep old regex for cleaning up any legacy syntax if it slips through, just in case
 REX_LEGACY_MATRIX = re.compile(r'(<(?!lora:)([^>]+)>)')
 REX_LEGACY_PARAM = re.compile(r'<(?!random\b)([a-zA-Z_]+)\(([^)]+)\)>')
 
 def parse_axis_references(prompt):
-    """
-    Parses the new reference tags from a prompt string.
-    Example: "a photo of a |matrix:animal|" -> [{'token': '|matrix:animal|', 'type': 'matrix', 'label': 'animal', 'start': 15}]
-    """
+    """Parses the new reference tags from a prompt string."""
     axes = []
     for match in REX_REFTAG.finditer(prompt):
         axes.append({
@@ -25,108 +18,119 @@ def parse_axis_references(prompt):
         })
     return sorted(axes, key=lambda x: x['start'])
 
-def build_job_list(p, seed_behavior, matrix_definitions, axis_overrides=None):
+def build_job_list(p, seed_behavior, matrix_definitions):
     """
-    The core logic. It now uses structured matrix_definitions from the UI.
-    - matrix_definitions: A list of dicts, e.g.,
-      [{'label': 'animal', 'type': 'matrix', 'options': ['cat', 'dog']},
-       {'label': 'cfg', 'type': 'Δ', 'options': ['7', '9']}]
+    HYBRID MODEL REWRITE
+    This function now returns a list of "page jobs".
+    Each page job is a dictionary containing everything needed to run a batch,
+    including a list of sub-prompts for the X/Y grid.
     """
-    # Create a lookup dictionary for fast access to definitions by their label
     definitions_map = {d['label']: d for d in matrix_definitions}
 
-    # 1. Parse references from prompts
+    # 1. Parse and enrich references from prompts
     pos_refs = parse_axis_references(p.prompt)
     neg_refs = parse_axis_references(p.negative_prompt)
     for ref in pos_refs: ref['origin'] = 'positive'
     for ref in neg_refs: ref['origin'] = 'negative'
-
-    # 2. Combine and enrich references with their full definitions
+    
     all_axes = []
     prompt_refs = sorted(pos_refs + neg_refs, key=lambda x: x['start'])
     for ref in prompt_refs:
         if ref['label'] in definitions_map:
-            # Merge the reference info (like 'token' and 'origin') with the full definition
             full_axis_def = {**definitions_map[ref['label']], **ref}
             all_axes.append(full_axis_def)
         else:
-            print(f"[UPM Warning] Reference '{ref['token']}' found in prompt but has no definition in the Matrix Builder. It will be ignored.")
+            print(f"[UPM Warning] Reference '{ref['token']}' has no definition and will be ignored.")
 
-    final_axes_order = all_axes
+    if not all_axes:
+        # No matrix defined, return a single "page job" with one prompt.
+        return [{"prompts": [p.prompt], "params": {}, "seeds": [p.seed]}], None
 
-    if not final_axes_order:
-        # If no valid axes are found, just clean the prompt and return a single job
-        cleaned_prompt = re.sub(REX_REFTAG, '', p.prompt)
-        cleaned_neg_prompt = re.sub(REX_REFTAG, '', p.negative_prompt)
-        return [{"pos_prompt": cleaned_prompt.strip(), "neg_prompt": cleaned_neg_prompt.strip(), "params": {}, "seed": p.seed}], None
+    # 2. Separate axes and VALIDATE the hybrid model rules.
+    random_axes = [axis for axis in all_axes if axis['type'] == 'random']
+    param_axes = [axis for axis in all_axes if axis['type'] == 'Δ']
+    prompt_axes = [axis for axis in all_axes if axis['type'] == 'matrix']
 
-    # 3. Separate axes into grid, page, and random
-    random_axes = [axis for axis in final_axes_order if axis.get('type') == 'random']
-    grid_axes = [axis for axis in final_axes_order if axis.get('type') != 'random']
+    # Validation: ALL parameter axes must come BEFORE ALL prompt axes.
+    # This enforces the "Params on Z-axis only" rule.
+    last_param_pos = max([ax['start'] for ax in param_axes]) if param_axes else -1
+    first_prompt_pos = min([ax['start'] for ax in prompt_axes]) if prompt_axes else float('inf')
 
-    x_axis = grid_axes[-1] if len(grid_axes) > 0 else None
-    y_axis = grid_axes[-2] if len(grid_axes) > 1 else None
-    page_axes = grid_axes[:-2] if len(grid_axes) > 2 else []
+    if last_param_pos > first_prompt_pos:
+        print("[UPM CRITICAL ERROR] Invalid axis order for Hybrid Mode.")
+        print("All parameter axes (|Δ:...|) must appear before all prompt axes (|matrix:...|) in the prompt.")
+        return [], {"error": "Invalid axis order for Hybrid Mode. All |Δ:...| tags must come before all |matrix:...| tags."}
+
+    # 3. Define page, X, and Y axes based on the new rules.
+    # Page axes are now ONLY parameter axes.
+    # X and Y axes are ONLY prompt axes.
+    x_axis = prompt_axes[-1] if len(prompt_axes) > 0 else None
+    y_axis = prompt_axes[-2] if len(prompt_axes) > 1 else None
+    
+    page_axes = param_axes # Page axes ARE the parameter axes.
 
     x_opts = x_axis['options'] if x_axis else ['']
     y_opts = y_axis['options'] if y_axis else ['']
+    
     page_options_list = [axis['options'] for axis in page_axes]
     page_combinations = list(product(*page_options_list)) if page_options_list else [()]
 
-    # 4. Build the job list
-    job_list = []
+    # 4. Build the list of page_jobs
+    page_job_list = []
     base_seed = p.seed if p.seed != -1 else random.randint(0, 2**32 - 1)
 
     for page_idx, page_vals in enumerate(page_combinations):
+        # This is a single page job, representing one batch.
+        page_job = {"prompts": [], "params": {}, "seeds": []}
+        
+        # Apply page-level parameters
+        page_prompt = p.prompt
+        page_neg_prompt = p.negative_prompt
+        if page_axes:
+            for axis, value in zip(page_axes, page_vals):
+                page_job['params'][axis['label']] = value
+                # Also substitute in prompt in case it's used for display, will be cleaned later
+                if axis['origin'] == 'positive': page_prompt = page_prompt.replace(axis['token'], "", 1)
+                else: page_neg_prompt = page_neg_prompt.replace(axis['token'], "", 1)
+        
+        # Now, build the list of prompts for the X/Y grid of THIS page
         for row_idx, y_val in enumerate(y_opts):
             for col_idx, x_val in enumerate(x_opts):
-                job = {"pos_prompt": p.prompt, "neg_prompt": p.negative_prompt, "params": {}}
+                final_prompt = page_prompt
+                final_neg_prompt = page_neg_prompt
 
-                # Handle random axes first
+                # Assign X and Y values
+                if y_axis:
+                    if y_axis['origin'] == 'positive': final_prompt = final_prompt.replace(y_axis['token'], y_val, 1)
+                    else: final_neg_prompt = final_neg_prompt.replace(y_axis['token'], y_val, 1)
+                if x_axis:
+                    if x_axis['origin'] == 'positive': final_prompt = final_prompt.replace(x_axis['token'], x_val, 1)
+                    else: final_neg_prompt = final_neg_prompt.replace(x_axis['token'], x_val, 1)
+
+                # Assign random values
                 for r_axis in random_axes:
                     chosen_val = random.choice(r_axis['options'])
-                    key = 'pos_prompt' if r_axis['origin'] == 'positive' else 'neg_prompt'
-                    job[key] = job[key].replace(r_axis['token'], chosen_val, 1)
+                    if r_axis['origin'] == 'positive': final_prompt = final_prompt.replace(r_axis['token'], chosen_val, 1)
+                    else: final_neg_prompt = final_neg_prompt.replace(r_axis['token'], chosen_val, 1)
+                
+                # Clean up any remaining tags and add to the list for this page
+                job_prompt = re.sub(REX_REFTAG, '', final_prompt).strip(" ,")
+                job_neg_prompt = re.sub(REX_REFTAG, '', final_neg_prompt).strip(" ,")
+                page_job['prompts'].append(f"{job_prompt} --neg {job_neg_prompt}")
 
-                # Assign values for grid/page axes
-                assignments = []
-                if page_axes: assignments.extend(zip(page_axes, page_vals))
-                if y_axis: assignments.append((y_axis, y_val))
-                if x_axis: assignments.append((x_axis, x_val))
+                # Assign seeds for this page's batch
+                image_index = (row_idx * len(x_opts)) + col_idx
+                if seed_behavior == "Fixed": page_job['seeds'].append(base_seed + page_idx)
+                elif seed_behavior == "Iterate Per Image": page_job['seeds'].append(base_seed + (page_idx * len(y_opts) * len(x_opts)) + image_index)
+                elif seed_behavior == "Iterate Per Row": page_job['seeds'].append(base_seed + (page_idx * len(y_opts)) + row_idx)
+                elif seed_behavior == "Random": page_job['seeds'].append(-1)
 
-                for axis, value in assignments:
-                    if axis['type'] == 'Δ':
-                        job['params'][axis['label']] = value
-                    else: # 'matrix' is a prompt substitution
-                        key = 'pos_prompt' if axis['origin'] == 'positive' else 'neg_prompt'
-                        job[key] = job[key].replace(axis['token'], value, 1)
+        page_job_list.append(page_job)
 
-                # Assign Seed
-                image_index = (page_idx * len(y_opts) * len(x_opts)) + (row_idx * len(x_opts)) + col_idx
-                if seed_behavior == "Fixed": job['seed'] = base_seed
-                elif seed_behavior == "Iterate Per Image": job['seed'] = base_seed + image_index
-                elif seed_behavior == "Iterate Per Row": job['seed'] = base_seed + (page_idx * len(y_opts)) + row_idx
-                elif seed_behavior == "Random": job['seed'] = -1
-
-                job_list.append(job)
-
-    # 5. Final cleanup of all prompts
-    for job in job_list:
-        # Remove any remaining reference tags and legacy syntax
-        job['pos_prompt'] = re.sub(REX_REFTAG, '', job['pos_prompt'])
-        job['neg_prompt'] = re.sub(REX_REFTAG, '', job['neg_prompt'])
-        job['pos_prompt'] = re.sub(REX_LEGACY_PARAM, '', re.sub(REX_LEGACY_MATRIX, '', job['pos_prompt'])).strip(' ,')
-        job['neg_prompt'] = re.sub(REX_LEGACY_PARAM, '', re.sub(REX_LEGACY_MATRIX, '', job['neg_prompt'])).strip(' ,')
-
-    # Prepare info for the grid drawing function
+    # 5. Prepare grid_info for the UI and grid drawing
     grid_info = {"x_axis": x_axis, "y_axis": y_axis, "page_axes": page_axes, "page_combinations": page_combinations}
+    if grid_info.get('x_axis'): grid_info['x_axis']['param_name'] = 'prompt'
+    if grid_info.get('y_axis'): grid_info['y_axis']['param_name'] = 'prompt'
+    for axis in grid_info.get('page_axes', []): axis['param_name'] = axis['label']
 
-    # Add 'param_name' key for correct label formatting later
-    if grid_info.get('x_axis'):
-        grid_info['x_axis']['param_name'] = grid_info['x_axis']['label'] if grid_info['x_axis']['type'] == 'Δ' else 'prompt'
-    if grid_info.get('y_axis'):
-        grid_info['y_axis']['param_name'] = grid_info['y_axis']['label'] if grid_info['y_axis']['type'] == 'Δ' else 'prompt'
-    for axis in grid_info.get('page_axes', []):
-        axis['param_name'] = axis['label'] if axis['type'] == 'Δ' else 'prompt'
-
-    return job_list, grid_info
+    return page_job_list, grid_info

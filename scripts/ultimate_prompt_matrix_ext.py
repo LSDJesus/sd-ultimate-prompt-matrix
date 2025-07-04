@@ -1,8 +1,9 @@
 """
-Ultimate Prompt Matrix v15.1.2
+Ultimate Prompt Matrix v15.1.3
 Author: LSDJesus
 Changes:
 - FIXED: `refresh_static_extras_btn` now correctly populates dropdowns by returning updates in a tuple.
+- FIXED: "Paste Last Prompts" button now correctly populates all generation parameters (steps, sampler, cfg, seed, size) by returning a tuple of updates directly from `upm_utils`.
 - Overhauled "Matrix Builder" mode selection:
     - Changed main "Builder Mode" from `gr.Radio` to `gr.Dropdown`.
 - Refactored "1D Axis" builder UI layout:
@@ -125,7 +126,7 @@ def on_ui_tabs():
             prompt = gr.Textbox(label="Prompt", lines=5, placeholder="Enter prompts with |matrix:label| syntax here...", elem_id="upm_prompt")
             with gr.Column(scale=0, min_width=50): # Column to stack buttons
                 clear_prompt_btn = gr.Button("🗑️", elem_classes="tool_sm")
-                paste_prompts_btn = gr.Button("↙️", elem_classes="tool_sm", tooltip="Paste prompts from last generation")
+                paste_prompts_btn = gr.Button("↙️", elem_classes="tool_sm", tooltip="Read generation parameters from prompt or last generation if prompt is empty into user interface.")
         with gr.Row():
             negative_prompt = gr.Textbox(label="Negative Prompt", lines=5, placeholder="Enter negative prompts here...", elem_id="upm_negative_prompt")
             with gr.Column(scale=0, min_width=50):
@@ -415,8 +416,18 @@ def on_ui_tabs():
         clear_prompt_btn.click(fn=lambda: "", outputs=[prompt])
         clear_neg_prompt_btn.click(fn=lambda: "", outputs=[negative_prompt])
         paste_prompts_btn.click(
-            fn=upm_utils.paste_last_prompts,
-            outputs=[prompt, negative_prompt]
+            fn=upm_utils.paste_last_prompts, # Directly call the function, it now returns a tuple of updates
+            outputs=[
+                prompt,
+                negative_prompt,
+                steps,
+                sampler_name,
+                scheduler,
+                cfg_scale,
+                seed,
+                width,
+                height
+            ]
         )
 
         # 3. Matrix Builder Handlers

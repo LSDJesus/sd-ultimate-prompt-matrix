@@ -2,6 +2,7 @@
 Ultimate Prompt Matrix v15.1.0
 Author: LSDJesus
 Changes:
+- Fixed ModuleNotFoundError by explicitly adding the script's directory to sys.path.
 - Overhauled "Static LoRA/Embedding" section:
     - Implemented multi-select dropdowns for available Embeddings and LoRAs.
     - Added "Add Selected" buttons to transfer choices to dedicated textboxes.
@@ -25,6 +26,15 @@ import gradio as gr
 import modules.scripts as scripts
 from modules import sd_samplers, sd_schedulers
 import modules.sd_models # For LoRA/Embedding dropdowns
+
+# --- CRITICAL FIX: Ensure script's directory is in sys.path for local imports ---
+import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+    sys.path.append(script_dir)
+# --- END CRITICAL FIX ---
+
 import upm_wildcard_handler # For wildcard dropdowns
 import upm_utils # For paste_last_prompts
 

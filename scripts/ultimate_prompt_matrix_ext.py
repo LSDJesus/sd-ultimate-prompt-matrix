@@ -99,7 +99,7 @@ def on_ui_tabs():
             with gr.Row():
                 static_embeddings_dropdown = gr.Dropdown(
                 label="Embeddings", 
-                choices=lambda: list(shared.sd_embeddings.embeddings.keys()) if hasattr(shared, 'sd_embeddings') and shared.sd_embeddings else [], # RE-CORRECTED LINE: Use a callable
+                choices=[], # CORRECTED: Initialize with empty list
                 multiselect=True, 
                 scale=3
                 )
@@ -107,7 +107,7 @@ def on_ui_tabs():
                 
                 static_loras_dropdown = gr.Dropdown(
                 label="LoRAs", 
-                choices=lambda: [lora.name for lora in sd_models.loras] if hasattr(sd_models, 'loras') else [], # RE-CORRECTED LINE: Use a callable
+                choices=[], # CORRECTED: Initialize with empty list
                 multiselect=True, 
                 scale=3
                 )
@@ -222,7 +222,7 @@ def on_ui_tabs():
                                 with gr.Row():
                                     lora_matrix_dropdown = gr.Dropdown(
                                         label=f"LoRAs (Block {j+1})", 
-                                        choices=lambda: [lora.name for lora in sd_models.loras] if hasattr(sd_models, 'loras') else [], # RE-CORRECTED LINE: Use a callable
+                                        choices=[], # CORRECTED: Initialize with empty list
                                         multiselect=True, 
                                         scale=2,
                                         elem_id=f"lora_matrix_dd_{i}_{j}"

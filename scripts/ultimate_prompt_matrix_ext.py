@@ -1,15 +1,14 @@
 """
-Ultimate Prompt Matrix v15.1.3
+Ultimate Prompt Matrix v15.1.4
 Author: LSDJesus
 Changes:
-- FIXED: `refresh_static_extras_btn` now correctly populates dropdowns by returning updates in a tuple.
-- FIXED: "Paste Last Prompts" button now correctly populates all generation parameters (steps, sampler, cfg, seed, size) by returning a tuple of updates directly from `upm_utils`.
-- Overhauled "Matrix Builder" mode selection:
-    - Changed main "Builder Mode" from `gr.Radio` to `gr.Dropdown`.
-- Refactored "1D Axis" builder UI layout:
-    - Arranged input fields (Name/Title, Variables, Syntax Display, Insert Button) on single rows for "Standard", "Random", and "Generation Setting" types.
-    - Updated Syntax Shortcut placeholders for "Standard", "Random", and "Wildcard" to match new desired formats (<|...|>, <|~...~|>, <|__...__|>).
-    - Removed "Syntax Shortcut" display and "Insert Shortcut to Prompt" button for "LoRA" and "Embedding" 1D axis types, as per new design.
+- FIXED: "Paste Last Prompts" button now correctly populates all generation parameters.
+- FIXED: `refresh_static_extras_btn` now correctly populates dropdowns.
+- Refactored "Matrix Builder" section:
+    - Moved and updated introductory markdown text for clarity and emphasis on image count.
+    - Swapped "Builder Mode" to `gr.Radio` buttons and "1D Axis Type" to a `gr.Dropdown` menu, as requested.
+    - Updated syntax shortcut placeholders for Standard, Random, and Wildcard 1D axis types.
+    - Confirmed LoRA and Embedding 1D axis types have no syntax shortcut or insert button.
 """
 import gradio as gr
 import modules.scripts as scripts
@@ -134,7 +133,8 @@ def on_ui_tabs():
 
         # 4. Matrix Builder (OVERHAULED)
         with gr.Accordion("Matrix Builder", open=True):
-            gr.Markdown("Define your matrix axes here. Remember: **|Δ:param|** axes must come before **|matrix:prompt|** axes for live previews to work.")
+            # Moved and updated introductory markdown text
+            gr.Markdown("Define your matrix axes here. *Number of generated images increases multiplicatively with number of variables per matrix and exponentially with dimensions.*")
             
             # State to manage the number of active matrix blocks (for advanced mode)
             num_active_matrix_blocks = gr.State(value=1) 
@@ -148,8 +148,8 @@ def on_ui_tabs():
             matrix_wildcard_name_dropdowns = [] # To store wildcard name dropdowns for insert tag fn (for advanced mode)
             all_lora_sub_managers = [] # To store info for managing LoRA sub-blocks (for advanced mode)
 
-            # New Dropdown for Matrix Mode within the builder (1D, 2D, 3D, 3D+Advanced)
-            builder_mode = gr.Dropdown( # Changed from gr.Radio to gr.Dropdown
+            # New Radio Buttons for Matrix Mode within the builder (1D, 2D, 3D, 3D+Advanced)
+            builder_mode = gr.Radio( # Changed from gr.Dropdown to gr.Radio
                 ["1D Axis", "2D Grid", "3D Grid", "3D+ (Advanced)"],
                 label="Builder Mode",
                 value="1D Axis" # Default selection
@@ -157,8 +157,8 @@ def on_ui_tabs():
 
             # --- Start UI for 1D Axis Builder Mode ---
             with gr.Column(visible=True) as builder_1d_ui:
-                # Nested Radio Buttons for the 1D Axis Type
-                one_d_axis_type_radio = gr.Radio(
+                # Nested Dropdown for the 1D Axis Type (Changed from Radio)
+                one_d_axis_type_dropdown = gr.Dropdown( # Changed from gr.Radio to gr.Dropdown
                     ["Standard", "Random", "Wildcard", "LoRA", "Embedding", "Generation Setting"],
                     label="1D Axis Type",
                     value="Standard" # Default selection for 1D mode
@@ -166,47 +166,47 @@ def on_ui_tabs():
 
                 # --- Dynamic UI for each 1D Axis Type ---
                 with gr.Column(visible=True) as one_d_standard_ui:
-                    with gr.Row(): # Changed to Row
+                    with gr.Row(): 
                         std_name = gr.Textbox(label="Name/Title", placeholder="e.g., animal, style")
                         std_vars = gr.Textbox(label="Variables (comma-separated)", placeholder="e.g., cat, dog, bird")
-                        std_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|Name/title|>") # Updated placeholder
+                        std_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|Name/title|>")
                         std_insert_btn = gr.Button("Insert Shortcut to Prompt")
 
                 with gr.Column(visible=False) as one_d_random_ui:
-                    with gr.Row(): # Changed to Row
+                    with gr.Row(): 
                         rand_name = gr.Textbox(label="Name/Title", placeholder="e.g., headwear, object")
                         rand_vars = gr.Textbox(label="Variables (comma-separated)", placeholder="e.g., hat, scarf, boots")
-                        rand_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|~Name/Title~|>") # Updated placeholder
+                        rand_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|~Name/Title~|>")
                         rand_insert_btn = gr.Button("Insert Shortcut to Prompt")
 
                 with gr.Column(visible=False) as one_d_wildcard_ui:
-                    with gr.Row(): # Changed to Row
+                    with gr.Row(): 
                         wc_name_dropdown = gr.Dropdown(
                             label="Wildcard Name",
                             choices=upm_wildcard_handler.get_wildcard_files(), # Dynamically load wildcard files
                             value=None,
                             scale=2
                         )
-                        wc_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|__wildcard__|>", scale=2) # Updated placeholder
+                        wc_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|__wildcard__|>", scale=2)
                         wc_insert_btn = gr.Button("Insert Shortcut to Prompt", scale=1)
 
                 with gr.Column(visible=False) as one_d_lora_ui:
-                    with gr.Row(): # Added Row for Name/Title and Add button
+                    with gr.Row(): 
                         lora_name = gr.Textbox(label="Name/Title (Optional)", placeholder="e.g., LoRA_Styles", scale=3)
                         add_lora_item_btn = gr.Button("Add LoRA Item", scale=1)
                     gr.Markdown("Define LoRA combinations for this matrix label:")
                     lora_matrix_items = [] # To store the individual LoRA + Weight sets
-                    lora_item_active_count = gr.State(value=1) # State for this specific Add LoRA Item button
-                    lora_item_containers = [] # List of gr.Row components
+                    lora_item_active_count = gr.State(value=1) 
+                    lora_item_containers = [] 
                     lora_item_dropdowns = []
                     lora_item_weights = []
 
-                    for j in range(MAX_MATRIX_BLOCKS): # Using MAX_MATRIX_BLOCKS as the limit for LoRA items too
-                        with gr.Row(visible=(j==0)) as lora_item_row: # First item visible
+                    for j in range(MAX_MATRIX_BLOCKS): 
+                        with gr.Row(visible=(j==0)) as lora_item_row: 
                             lora_dd = gr.Dropdown(
                                 label=f"LoRA {j+1}",
                                 choices=[], # Initialized empty, populated by refresh
-                                multiselect=False, # Single LoRA per line for explicit weight
+                                multiselect=False, 
                                 scale=2
                             )
                             lora_weight = gr.Slider(label="Weight", minimum=-2.0, maximum=2.0, value=1.0, step=0.05, scale=1)
@@ -214,10 +214,10 @@ def on_ui_tabs():
                             lora_item_dropdowns.append(lora_dd)
                             lora_item_weights.append(lora_weight)
                     
-                    gr.Markdown("Note: LoRAs will be appended to the end of the prompt for each image.") # Note kept
+                    gr.Markdown("Note: LoRAs will be appended to the end of the prompt for each image.") 
 
                 with gr.Column(visible=False) as one_d_embedding_ui:
-                    with gr.Row(): # Added Row for Name/Title and Add button
+                    with gr.Row(): 
                         embedding_name = gr.Textbox(label="Name/Title (Optional)", placeholder="e.g., Embedding_Details", scale=3)
                         add_embedding_item_btn = gr.Button("Add Embedding Item", scale=1)
                     gr.Markdown("Define Embedding combinations for this matrix label:")
@@ -240,10 +240,10 @@ def on_ui_tabs():
                             embedding_item_dropdowns.append(embedding_dd)
                             embedding_item_weights.append(embedding_weight)
                     
-                    gr.Markdown("Note: Embeddings will be appended to the beginning of the prompt for each image.") # Note kept
+                    gr.Markdown("Note: Embeddings will be appended to the beginning of the prompt for each image.") 
 
                 with gr.Column(visible=False) as one_d_setting_ui:
-                    with gr.Row(): # Changed to Row
+                    with gr.Row(): 
                         setting_name = gr.Textbox(label="Name/Title (Optional)", placeholder="e.g., CFG_Values")
                         setting_type_dd = gr.Dropdown(
                             label="Setting Type",
@@ -267,9 +267,9 @@ def on_ui_tabs():
                     }
                     return updates
 
-                one_d_axis_type_radio.change(
+                one_d_axis_type_dropdown.change( # Changed to .change for dropdown
                     fn=on_one_d_axis_type_change,
-                    inputs=one_d_axis_type_radio,
+                    inputs=one_d_axis_type_dropdown,
                     outputs=[
                         one_d_standard_ui, one_d_random_ui, one_d_wildcard_ui,
                         one_d_lora_ui, one_d_embedding_ui, one_d_setting_ui
@@ -596,12 +596,9 @@ def on_ui_tabs():
             outputs=[lora_item_active_count, add_lora_item_btn] + lora_item_containers
         )
 
-        # Logic to generate LoRA syntax string (no longer a displayed syntax shortcut or insert button)
-        def on_lora_items_change(lora_matrix_label_name, *args): # Added lora_matrix_label_name
-            # This function's primary purpose is now to *trigger* the backend
-            # to know the LoRA values are set. No direct syntax display.
-            # The 'lora_syntax_display' and 'lora_insert_btn' are removed.
-            pass # No updates needed for syntax display
+        # Logic for LoRA item changes (no longer a displayed syntax shortcut or insert button)
+        def on_lora_items_change(lora_matrix_label_name, *args): 
+            pass # No updates needed for syntax display, just a trigger for backend later
         
         lora_item_inputs_for_change = [lora_name] # Start with the name, then all dropdowns/weights
         for item in lora_matrix_items:
@@ -633,12 +630,9 @@ def on_ui_tabs():
             outputs=[embedding_item_active_count, add_embedding_item_btn] + embedding_item_containers
         )
 
-        # Logic to generate Embedding syntax string (no longer a displayed syntax shortcut or insert button)
-        def on_embedding_items_change(embedding_matrix_label_name, *args): # Added embedding_matrix_label_name
-            # This function's primary purpose is now to *trigger* the backend
-            # to know the Embedding values are set. No direct syntax display.
-            # The 'embedding_syntax_display' and 'embedding_insert_btn' are removed.
-            pass # No updates needed for syntax display
+        # Logic for Embedding item changes (no longer a displayed syntax shortcut or insert button)
+        def on_embedding_items_change(embedding_matrix_label_name, *args):
+            pass # No updates needed for syntax display, just a trigger for backend later
         
         embedding_item_inputs_for_change = [embedding_name] # Start with the name, then all dropdowns/weights
         for item in embedding_matrix_items:
@@ -647,10 +641,6 @@ def on_ui_tabs():
 
         for item in embedding_item_inputs_for_change:
             item.change(fn=on_embedding_items_change, inputs=embedding_item_inputs_for_change, outputs=[]) # No outputs for this handler
-
-        # Removed these as per the new design:
-        # embedding_insert_btn.click(fn=lambda text, tag_text: f"{tag_text} {text.strip()}".strip() if tag_text else text, inputs=[prompt, embedding_syntax_display], outputs=prompt)
-        # lora_insert_btn.click(fn=lambda text, tag_text: f"{text.strip()} {tag_text}".strip() if tag_text else text, inputs=[prompt, lora_syntax_display], outputs=prompt)
         
         return [(ui_component, "Ultimate Matrix", "ultimate_matrix")]
 

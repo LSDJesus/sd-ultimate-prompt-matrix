@@ -1,16 +1,11 @@
 """
-Ultimate Prompt Matrix v15.1.5
+Ultimate Prompt Matrix v15.1.6
 Author: LSDJesus
 Changes:
-- Re-architected the "Matrix Builder" to use a unified, dynamic approach.
-    - Removed separate UI columns for 1D, 2D, 3D modes.
-    - `Builder Mode` radio buttons now dynamically control the visibility of a single set of up to 5 axis definition rows.
-    - Added a dynamic `gr.Markdown` component (`builder_layout_description`) to describe the current grid layout (1D, 2D, 3D, or 3D+).
-    - "Add New Matrix" button is now correctly hidden and only becomes active in "3D+ (Advanced)" mode.
-- Revised Axis Type dropdown:
-    - Added "Model" as a selectable axis type.
-    - This "Model" option will be dynamically shown or hidden based on the selected Builder Mode (visible in 3D and 3D+ modes).
-- The VAE dropdown (in the Generation Settings section) will be styled to allow multiple selections, like the main A1111/Forge UI (visual implementation; backend logic to follow).
+- FIXED: Resolved issue where axis type dropdowns were inaccessible (non-interactive) in 2D, 3D, and 3D+ modes by explicitly making them interactive.
+- FIXED: Removed duplicate "Insert Tag to Prompt" buttons from conditional UI groups, leaving only one per axis row.
+- UI Cleanup: Removed the unnecessary "On" checkbox from each axis definition row.
+- UI Enhancement: "3D+ (Advanced)" mode now correctly defaults to showing 4 axis definition rows.
 """
 import gradio as gr
 import modules.scripts as scripts
@@ -33,8 +28,6 @@ MAX_MATRIX_BLOCKS = 5 # Used for both top-level and LoRA sub-blocks for now
 
 # --- Helper for Generation Settings Dropdown ---
 # This list will be used for the "Setting Type" dropdown
-# Values correspond to parameter names in processing.py where applicable.
-# 'size' is a special combined string.
 GENERATION_SETTINGS_CHOICES = [
     "cfg_scale", "steps", "size", "sampler_name", "scheduler",
     "seed", "denoising_strength", "clip_skip", "eta", "seed_resize_from_w",
@@ -154,23 +147,25 @@ def on_ui_tabs():
             matrix_block_uis = [] 
             matrix_type_dropdowns = [] 
             matrix_label_textboxes = [] 
-            insert_tag_buttons = [] 
             matrix_variable_groups = [] 
             matrix_setting_type_dropdowns = [] 
-            matrix_wildcard_name_dropdowns = [] 
-            all_lora_sub_managers = [] 
+            matrix_wildcard_name_dropdowns = []
+            all_lora_sub_managers = []
+            all_embedding_sub_managers = []
+            std_insert_btns = [] # New list for standard insert buttons
+            rand_insert_btns = [] # New list for random insert buttons
+            wc_insert_btns = [] # New list for wildcard insert buttons
+            setting_insert_btns = [] # New list for setting insert buttons 
             
             # Dynamically create MAX_MATRIX_BLOCKS (5) matrix definition rows
             for i in range(MAX_MATRIX_BLOCKS):
-                # Only the first one is visible by default (for 1D Axis mode)
-                # Others become visible based on builder_mode or add_new_matrix_block_btn
                 with gr.Group(visible=(i == 0)) as matrix_block: 
                     with gr.Row():
-                        enabled_checkbox = gr.Checkbox(label="On", value=(i == 0), scale=0) 
-                        m_type_dropdown = gr.Dropdown( # Now a simple dropdown for 'Axis Type'
+                        # The 'On' checkbox has been removed
+                        m_type_dropdown = gr.Dropdown(
                             ["Standard", "Random", "Wildcard", "LoRA", "Embedding", "Generation Setting", "Model"], 
                             value="Standard", 
-                            label="Axis Type", # Changed label from 'Type'
+                            label=f"Axis {i+1} Type", # Added index for clarity
                             scale=1, 
                             elem_id=f"matrix_type_dd_{i}" 
                         )
@@ -180,32 +175,21 @@ def on_ui_tabs():
                             scale=2, 
                             elem_id=f"matrix_label_tb_{i}"
                         )
-                        insert_tag_btn = gr.Button("Insert Tag to Prompt", scale=1) 
                     
                     # Conditional input areas for variables based on type (nested directly inside the matrix_block)
-                    with gr.Column(visible=True) as standard_group: # Default visible for "Standard"
+                    with gr.Column(visible=True) as standard_group: 
                         with gr.Row():
-                            standard_vars_textbox = gr.Textbox(
-                                placeholder="e.g., cat, dog, bird", 
-                                label="Variables (comma-separated)", 
-                                lines=1, 
-                                elem_id=f"standard_vars_tb_{i}",
-                                scale=4
-                            )
-                            std_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|Name/title|>", scale=2) # Updated placeholder
-                            std_insert_btn = gr.Button("Insert Shortcut to Prompt", scale=1)
+                            standard_vars_textbox = gr.Textbox(placeholder="e.g., cat, dog, bird", label="Variables", scale=3)
+                            std_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|Name/title|>", scale=2)
+                            std_insert_btn = gr.Button("Insert Shortcut", scale=1) # Renamed
+                            std_insert_btns.append(std_insert_btn)
 
                     with gr.Column(visible=False) as random_group:
                         with gr.Row():
-                            random_vars_textbox = gr.Textbox(
-                                placeholder="e.g., hat, scarf, boots", 
-                                label="Variables (comma-separated)", 
-                                lines=1, 
-                                elem_id=f"random_vars_tb_{i}",
-                                scale=4
-                            )
-                            rand_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|~Name/Title~|>", scale=2) # Updated placeholder
-                            rand_insert_btn = gr.Button("Insert Shortcut to Prompt", scale=1)
+                            random_vars_textbox = gr.Textbox(placeholder="e.g., hat, scarf, boots", label="Variables", scale=3)
+                            rand_syntax_display = gr.Textbox(label="Syntax Shortcut", interactive=False, placeholder="<|~Name/Title~|>", scale=2)
+                            rand_insert_btn = gr.Button("Insert Shortcut", scale=1) # Renamed
+                            rand_insert_btns.append(rand_insert_btn)
                     
                     with gr.Column(visible=False) as setting_group:
                         with gr.Row():
@@ -331,7 +315,6 @@ def on_ui_tabs():
                 matrix_block_uis.append(matrix_block)
                 matrix_type_dropdowns.append(m_type_dropdown)
                 matrix_label_textboxes.append(m_label_textbox)
-                insert_tag_buttons.append(insert_tag_btn)
                 matrix_variable_groups.append({
                     "standard": standard_group,
                     "random": random_group,
@@ -466,44 +449,89 @@ def on_ui_tabs():
         # 3. Matrix Builder Handlers
         
         # --- Builder Mode and Layout Description Handler ---
-        def on_builder_mode_change(mode, num_active_blocks):
-            updates = {}
-            if mode == "1D Axis":
-                updates[builder_layout_description] = gr.update(value="Current Layout: **1D Axis** (A single list of images, defined by the axis below).")
-                for i, block in enumerate(matrix_block_uis):
-                    updates[block] = gr.update(visible=(i == 0))
-                updates[add_new_matrix_block_btn] = gr.update(visible=False)
-            elif mode == "2D Grid":
-                updates[builder_layout_description] = gr.update(value="Current Layout: **2D Grid** (X/Y grid). Axis 1 is X, Axis 2 is Y.")
-                for i, block in enumerate(matrix_block_uis):
-                    updates[block] = gr.update(visible=(i < 2))
-                updates[add_new_matrix_block_btn] = gr.update(visible=False)
+        def on_builder_mode_change(mode):
+            num_visible = 1
+            layout_desc = "Current Layout: **1D Axis** (A single list of images, defined by the axis below)."
+            add_btn_visible = False
+            add_btn_interactive = False
+            num_active_state = 1
+
+            if mode == "2D Grid":
+                num_visible = 2
+                layout_desc = "Current Layout: **2D Grid**. Axis 1 is X, Axis 2 is Y."
             elif mode == "3D Grid":
-                updates[builder_layout_description] = gr.update(value="Current Layout: **3D Grid** (XYZ/Page grid). Axis 1 is X, Axis 2 is Y, Axis 3 is Page.")
-                for i, block in enumerate(matrix_block_uis):
-                    updates[block] = gr.update(visible=(i < 3))
-                updates[add_new_matrix_block_btn] = gr.update(visible=False)
+                num_visible = 3
+                layout_desc = "Current Layout: **3D Grid**. Axis 1 is X, Axis 2 is Y, Axis 3 is Page."
             elif mode == "3D+ (Advanced)":
-                description = f"Current Layout: **3D+ Advanced Grid**. {num_active_blocks} axes defined. The first axis is X, the second is Y, and all subsequent axes are Page axes."
-                updates[builder_layout_description] = gr.update(value=description)
-                for i, block in enumerate(matrix_block_uis):
-                    updates[block] = gr.update(visible=(i < num_active_blocks))
-                updates[add_new_matrix_block_btn] = gr.update(visible=True, interactive=(num_active_blocks < MAX_MATRIX_BLOCKS))
+                num_visible = 4  # Default to 4 visible rows for advanced
+                num_active_state = 4
+                description = f"Current Layout: **3D+ Advanced Grid**. {num_visible} axes defined. The first is X, the second is Y, and subsequent axes are Page axes."
+                layout_desc = description
+                add_btn_visible = True
+                add_btn_interactive = num_visible < MAX_MATRIX_BLOCKS
+            
+            updates = {
+                builder_layout_description: gr.update(value=layout_desc),
+                add_new_matrix_block_btn: gr.update(visible=add_btn_visible, interactive=add_btn_interactive),
+                num_active_matrix_blocks: num_active_state
+            }
+
+            for i, block in enumerate(matrix_block_uis):
+                updates[block] = gr.update(visible=(i < num_visible))
 
             # Dynamically show/hide "Model" option in Axis Type dropdowns
+            choices = ["Standard", "Random", "Wildcard", "LoRA", "Embedding", "Generation Setting"]
+            if mode in ["3D Grid", "3D+ (Advanced)"]:
+                choices.append("Model")
+            
             for dd in matrix_type_dropdowns:
-                choices = ["Standard", "Random", "Wildcard", "LoRA", "Embedding", "Generation Setting"]
-                if mode in ["3D Grid", "3D+ (Advanced)"]:
-                    choices.append("Model")
                 updates[dd] = gr.update(choices=choices)
             
             return updates
         
         builder_mode.change(
             fn=on_builder_mode_change,
-            inputs=[builder_mode, num_active_matrix_blocks],
-            outputs=[builder_layout_description, add_new_matrix_block_btn] + matrix_block_uis + matrix_type_dropdowns
+            inputs=[builder_mode],
+            outputs=[builder_layout_description, add_new_matrix_block_btn, num_active_matrix_blocks] + matrix_block_uis + matrix_type_dropdowns
         )
+
+        def on_add_new_matrix_block(current_num_active):
+            new_num = min(current_num_active + 1, MAX_MATRIX_BLOCKS)
+            updates = {
+                num_active_matrix_blocks: new_num,
+                add_new_matrix_block_btn: gr.update(interactive=(new_num < MAX_MATRIX_BLOCKS))
+            }
+            for i, block in enumerate(matrix_block_uis):
+                updates[block] = gr.update(visible=(i < new_num))
+
+            return updates
+
+        add_new_matrix_block_btn.click(
+            fn=on_add_new_matrix_block,
+            inputs=[num_active_matrix_blocks],
+            outputs=[num_active_matrix_blocks, add_new_matrix_block_btn] + matrix_block_uis
+        )
+
+        # Handler for each Matrix Type Dropdown (for all dynamic matrix blocks)
+        for i, m_type_dd in enumerate(matrix_type_dropdowns): 
+            def _on_matrix_type_change_closure(selected_type, current_index=i):
+                groups = matrix_variable_groups[current_index]
+                updates = {
+                    groups["standard"]: gr.update(visible=(selected_type == "Standard")),
+                    groups["random"]: gr.update(visible=(selected_type == "Random")),
+                    groups["setting"]: gr.update(visible=(selected_type == "Setting")),
+                    groups["wildcard"]: gr.update(visible=(selected_type == "Wildcard")),
+                    groups["lora"]: gr.update(visible=(selected_type == "LoRA")),
+                    groups["embedding"]: gr.update(visible=(selected_type == "Embedding")),
+                    groups["model"]: gr.update(visible=(selected_type == "Model"))
+                }
+                return updates
+            
+            m_type_dd.change(
+                fn=_on_matrix_type_change_closure,
+                inputs=[m_type_dd], 
+                outputs=list(matrix_variable_groups[i].values())
+            )
 
         # --- Other handlers from previous versions to be integrated/re-wired ---
         # ...

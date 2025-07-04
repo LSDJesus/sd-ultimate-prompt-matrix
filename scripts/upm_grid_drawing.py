@@ -7,49 +7,70 @@ def get_font(fontsize):
         try: return ImageFont.truetype("arial.ttf", fontsize)
         except IOError: return ImageFont.load_default()
 
+def draw_preview_grid(x_labels, y_labels, page_labels):
+    """Generates a simple black and white PIL image to visually represent the grid structure."""
+    cell_size = 64
+    margin = 8
+    font = get_font(24)
+
+    # Determine dimensions
+    num_cols = len(x_labels) if x_labels else 1
+    num_rows = len(y_labels) if y_labels else 1
+    
+    # Calculate text sizes to determine overall image dimensions
+    x_label_max_w = max(font.getbbox(label)[2] for label in x_labels) if x_labels else 0
+    y_label_max_w = max(font.getbbox(label)[2] for label in y_labels) if y_labels else 0
+    
+    # Define widths and heights for different sections
+    header_h = font.getbbox("Tg")[3] + margin * 2  # For X-axis labels
+    y_axis_w = y_label_max_w + margin * 2
+    
+    title_text = " | ".join(page_labels) if page_labels else "Single Grid"
+    title_h = font.getbbox(title_text)[3] + margin * 2 if title_text else 0
+
+    grid_w = num_cols * cell_size
+    grid_h = num_rows * cell_size
+
+    total_w = y_axis_w + grid_w
+    total_h = title_h + header_h + grid_h
+
+    # Create image and draw object
+    img = Image.new('RGB', (total_w, total_h), 'white')
+    draw = ImageDraw.Draw(img)
+
+    # Draw Title (Page Axes)
+    if title_text:
+        draw.text((total_w / 2, margin), title_text, font=font, fill='black', anchor='mt')
+
+    # Draw X-axis labels (headers)
+    for i, label in enumerate(x_labels):
+        x = y_axis_w + (i * cell_size) + (cell_size / 2)
+        y = title_h + margin
+        draw.text((x, y), str(label), font=font, fill='black', anchor='mt')
+    
+    # Draw Y-axis labels
+    for i, label in enumerate(y_labels):
+        x = margin
+        y = title_h + header_h + (i * cell_size) + (cell_size / 2)
+        draw.text((x, y), str(label), font=font, fill='black', anchor='lm')
+
+    # Draw grid lines
+    for i in range(num_cols + 1):
+        x0 = y_axis_w + i * cell_size
+        y0 = title_h + header_h
+        x1 = x0
+        y1 = total_h
+        draw.line([(x0, y0), (x1, y1)], fill='black', width=1)
+        
+    for i in range(num_rows + 1):
+        x0 = y_axis_w
+        y0 = title_h + header_h + i * cell_size
+        x1 = total_w
+        y1 = y0
+        draw.line([(x0, y0), (x1, y1)], fill='black', width=1)
+
+    return img
+
 def draw_grid_with_annotations(grid_images, x_labels, y_labels, margin_size, title="", show_annotations=True):
     if not grid_images or not any(grid_images) or not isinstance(grid_images[0], Image.Image): return None
     num_cols = len(x_labels) if x_labels else math.ceil(math.sqrt(len(grid_images)))
-    if num_cols == 0: return None
-    num_rows = math.ceil(len(grid_images) / num_cols)
-    if num_rows == 0: return None
-    img_w, img_h = grid_images[0].size
-    label_font = get_font(30); title_font = get_font(36)
-    y_label_w = (max(label_font.getbbox(label)[2] for label in y_labels) + margin_size * 2) if y_labels and show_annotations else 0
-    x_label_h = (label_font.getbbox("Tg")[3] + margin_size * 2) if x_labels and show_annotations else 0
-    title_h = (title_font.getbbox("Tg")[3] + margin_size * 2) if title and show_annotations else 0
-    grid_w = y_label_w + (num_cols * img_w) + (margin_size * (num_cols - 1))
-    grid_h = title_h + x_label_h + (num_rows * img_h) + (margin_size * (num_rows - 1))
-    grid_image = Image.new('RGB', (int(grid_w), int(grid_h)), color='white')
-    draw = ImageDraw.Draw(grid_image)
-    if title and show_annotations: draw.text((grid_w / 2, margin_size), title, font=title_font, fill='black', anchor="mt")
-    if x_labels and show_annotations:
-        for i, label in enumerate(x_labels):
-            x_pos = y_label_w + (i * (img_w + margin_size)) + (img_w / 2); y_pos = title_h + margin_size
-            draw.text((x_pos, y_pos), label, font=label_font, fill='black', anchor="mt")
-    if y_labels and show_annotations:
-        for i, label in enumerate(y_labels):
-            x_pos = margin_size; y_pos = title_h + x_label_h + (i * (img_h + margin_size)) + (img_h / 2)
-            draw.text((x_pos, y_pos), label, font=label_font, fill='black', anchor="lm")
-    for i, img in enumerate(grid_images):
-        col, row = i % num_cols, i // num_cols
-        paste_x = y_label_w + col * (img_w + margin_size); paste_y = title_h + x_label_h + row * (img_h + margin_size)
-        grid_image.paste(img, (int(paste_x), int(paste_y)))
-    return grid_image
-
-def create_mega_grid(all_grids, page_labels, margin_size, show_annotations=True):
-    valid_grids = [g for g in all_grids if g is not None]
-    if not valid_grids or len(valid_grids) <= 1: return None
-    mega_cols = math.ceil(math.sqrt(len(valid_grids))); mega_rows = math.ceil(len(valid_grids) / mega_cols)
-    grid_w, grid_h = valid_grids[0].size
-    font = get_font(36); title_h = 50 if show_annotations else 0
-    mega_w = mega_cols * grid_w + margin_size * (mega_cols + 1)
-    mega_h = mega_rows * (grid_h + title_h) + margin_size * (mega_rows + 1)
-    mega_image = Image.new('RGB', (int(mega_w), int(mega_h)), color='#DDDDDD')
-    draw = ImageDraw.Draw(mega_image)
-    for i, grid in enumerate(valid_grids):
-        col, row = i % mega_cols, i // mega_cols
-        cell_x = margin_size + col * (grid_w + margin_size); cell_y = margin_size + row * (grid_h + title_h + margin_size)
-        if show_annotations: draw.text((cell_x + grid_w / 2, cell_y + title_h / 2), page_labels[i], font=font, fill='black', anchor="mm")
-        mega_image.paste(grid, (int(cell_x), int(cell_y + title_h)))
-    return mega_image

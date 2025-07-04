@@ -1,11 +1,13 @@
 """
-Ultimate Prompt Matrix v15.1.6
+Ultimate Prompt Matrix v15.1.7
 Author: LSDJesus
 Changes:
-- FIXED: Resolved issue where axis type dropdowns were inaccessible (non-interactive) in 2D, 3D, and 3D+ modes by explicitly making them interactive.
-- FIXED: Removed duplicate "Insert Tag to Prompt" buttons from conditional UI groups, leaving only one per axis row.
-- UI Cleanup: Removed the unnecessary "On" checkbox from each axis definition row.
-- UI Enhancement: "3D+ (Advanced)" mode now correctly defaults to showing 4 axis definition rows.
+- Overhauled "Matrix Preview & Control" section:
+    - Replaced text-based axis displays with a single graphical preview image.
+    - Removed the "Cycle Page/Y/X" button to simplify UI and prevent axis-type errors.
+    - The "Swap X/Y" button now triggers a redraw of the graphical preview.
+- Integrated `draw_preview_grid` function from `upm_grid_drawing` to generate the preview.
+- Updated `on_preprocess_click` event handler to call the new drawing function and update the preview image.
 """
 import gradio as gr
 import modules.scripts as scripts
@@ -22,6 +24,7 @@ if script_dir not in sys.path:
 
 import upm_wildcard_handler # For wildcard dropdowns
 import upm_utils # For paste_last_prompts
+import upm_grid_drawing # Added for the graphical preview
 
 # --- CONSTANTS ---
 MAX_MATRIX_BLOCKS = 5 # Used for both top-level and LoRA sub-blocks for now
@@ -341,12 +344,16 @@ def on_ui_tabs():
 
         # --- IV. Preview & Auxiliary Tools ---
         with gr.Accordion("Matrix Preview & Control", open=True):
-            axis_x_display = gr.Textbox(label="X-Axis", interactive=False)
-            axis_y_display = gr.Textbox(label="Y-Axis", interactive=False)
-            axis_page_display = gr.Textbox(label="Page-Axes", interactive=False)
-            random_axis_display = gr.Textbox(label="Random Axes (Not in Grid)", interactive=False)
-            swap_xy_btn = gr.Button("Swap X/Y")
-            cycle_page_btn = gr.Button("Cycle Page/Y/X")
+            # The textboxes have been replaced by a single gr.Image component
+            matrix_preview_display = gr.Image(label="Grid Preview", interactive=False, show_label=False)
+            
+            # Keep the Swap X/Y button, but remove the Cycle button
+            with gr.Row():
+                swap_xy_btn = gr.Button("Swap X/Y")
+            
+            # Hidden state components to hold the staged job data
+            staged_job_list = gr.State([])
+            staged_grid_info = gr.State({})
 
         # --- V. Action Buttons & Output (Bottom Section) ---
         gr.Markdown("### Generation")
@@ -532,7 +539,60 @@ def on_ui_tabs():
                 inputs=[m_type_dd], 
                 outputs=list(matrix_variable_groups[i].values())
             )
+        # 4. Pre-process & Preview Handlers
+        def on_preprocess_click(*args):
+            # This function will eventually call the core logic to build the job list.
+            # For now, it will just generate a dummy preview based on mock data.
+            
+            # In the final version, this will be replaced by:
+            # job_list, grid_info = upm_logic.build_job_list(...)
+            
+            # --- MOCK DATA for UI DEMO ---
+            mock_grid_info = {
+                "x_axis": {"options": ["Style A", "Style B", "Style C"]},
+                "y_axis": {"options": ["Cat", "Dog"]},
+                "page_axes": [
+                    {"label": "cfg_scale", "options": ["7.0", "9.0"]},
+                    {"label": "sampler_name", "options": ["Euler a", "DPM++"]}
+                ]
+            }
+            # --- END MOCK DATA ---
 
+            x_labels = mock_grid_info.get("x_axis", {}).get("options", [])
+            y_labels = mock_grid_info.get("y_axis", {}).get("options", [])
+            page_labels = [f"{ax['label']}: {len(ax['options'])} values" for ax in mock_grid_info.get("page_axes", [])]
+
+            preview_image = upm_grid_drawing.draw_preview_grid(x_labels, y_labels, page_labels)
+            
+            # Status update
+            # This will eventually show the real image count and ETA
+            num_images = (len(x_labels) or 1) * (len(y_labels) or 1) * (len(page_labels) or 1) # Simplified calc
+            status_text = f"Status: Staged {num_images} images. Ready to generate."
+            
+            return {
+                matrix_preview_display: gr.update(value=preview_image),
+                calculation_results_display: gr.update(value=status_text),
+                generate_btn: gr.update(interactive=True)
+            }
+        
+        # We need to collect ALL inputs for the pre-process step eventually.
+        # For now, it takes no inputs since we are using mock data.
+        preprocess_btn.click(
+            fn=on_preprocess_click,
+            inputs=[], # This will be a long list of all UI components later
+            outputs=[
+                matrix_preview_display,
+                calculation_results_display,
+                generate_btn
+            ]
+        )
+
+        # Placeholder for swap_xy_btn click handler
+        # This will eventually swap the staged_grid_info and redraw the preview
+        swap_xy_btn.click(
+            fn=lambda: gr.Info("Swap X/Y button clicked. (Functionality to be implemented)"),
+            outputs=None
+        )
         # --- Other handlers from previous versions to be integrated/re-wired ---
         # ...
 

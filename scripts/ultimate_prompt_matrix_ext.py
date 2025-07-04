@@ -24,7 +24,7 @@ Changes:
 """
 import gradio as gr
 import modules.scripts as scripts
-from modules import sd_samplers, sd_schedulers
+from modules import sd_samplers, sd_schedulers, shared, sd_models
 import modules.sd_models # For LoRA/Embedding dropdowns
 
 # --- CRITICAL FIX: Ensure script's directory is in sys.path for local imports ---
@@ -98,18 +98,18 @@ def on_ui_tabs():
             
             with gr.Row():
                 static_embeddings_dropdown = gr.Dropdown(
-                    label="Embeddings", 
-                    choices=[ti.name for ti in modules.sd_models.get_available_text_inversions()], 
-                    multiselect=True, 
-                    scale=3
+                label="Embeddings", 
+                choices=list(shared.sd_embeddings.embeddings.keys()), # CORRECTED LINE
+                multiselect=True, 
+                scale=3
                 )
                 add_selected_embeddings_btn = gr.Button("Add Selected Embeddings", scale=1)
                 
                 static_loras_dropdown = gr.Dropdown(
-                    label="LoRAs", 
-                    choices=[l.name for l in modules.sd_models.get_available_loras()], 
-                    multiselect=True, 
-                    scale=3
+                label="LoRAs", 
+                choices=[lora.name for lora in sd_models.loras], # CORRECTED LINE
+                multiselect=True, 
+                scale=3
                 )
                 add_selected_loras_btn = gr.Button("Add Selected LoRAs", scale=1)
 

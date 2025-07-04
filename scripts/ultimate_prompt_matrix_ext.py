@@ -317,7 +317,7 @@ def on_ui_tabs():
                         with gr.Row():
                             model_name_dropdown = gr.Dropdown(
                                 label="Model", 
-                                choices=[lora.name for lora in sd_models.checkpoints_list], 
+                                choices=sd_models.checkpoints_list, # CORRECTED LINE 
                                 multiselect=True,
                                 scale=4
                             )

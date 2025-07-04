@@ -2,7 +2,7 @@ import re
 import os
 import modules.scripts as scripts
 import modules.shared as shared 
-import gradio as gr # <--- ADDED: Import gradio for gr.update()
+import gradio as gr # Added: Import gradio for gr.update()
 
 def paste_last_prompts():
     # Initialize values to gr.update() to signify "no change" if parameter not found
@@ -44,7 +44,7 @@ def paste_last_prompts():
 
     if not info_string:
         print("[Ultimate Matrix] Could not find last generation info from any source.")
-        # Return gr.update() for all UI components when no info is found
+        # Return gr.update() for all UI components when no info is found, in the correct order
         return (prompt_val, neg_prompt_val, steps_val, sampler_name_val, scheduler_val, 
                 cfg_scale_val, seed_val, width_val, height_val)
 
